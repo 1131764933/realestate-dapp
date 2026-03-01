@@ -11,16 +11,11 @@ function initBlockchainService() {
     console.log('PRIVATE_KEY:', process.env.PRIVATE_KEY ? 'set' : 'missing');
     console.log('RPC_URL:', process.env.RPC_URL);
     
-    const contractAddress = process.env.CONTRACT_ADDRESS;
+    const contractAddress = process.env.CONTRACT_ADDRESS || '0xB7f8BC63BbcaD18155201308C8f3540b07f84F5e';
     const privateKey = process.env.PRIVATE_KEY;
     const rpcUrl = process.env.RPC_URL || 'http://localhost:8545';
     
-    if (!contractAddress || !privateKey) {
-        console.log('BlockchainService not initialized (missing CONTRACT_ADDRESS or PRIVATE_KEY)');
-        return null;
-    }
-    
-    // 完整的 ABI
+    // 完整的 ABI（包含事件）
     const abi = [
         "function propertyPrice(uint256) view returns (uint256)",
         "function propertyActive(uint256) view returns (bool)",
@@ -31,22 +26,35 @@ function initBlockchainService() {
         "function cancelBooking(uint256)",
         "function completeBooking(uint256)",
         "function mintBookingNFT(address, uint256)",
+        "function bookingCount() view returns (uint256)",
         "event BookingCreated(uint256, address, uint256, uint256, uint256, uint256, uint8)",
         "event BookingCancelled(uint256, address, uint8)",
         "event BookingCompleted(uint256, address, uint8)",
         "event PropertyAdded(uint256, uint256)"
     ];
     
-    const BlockchainService = require('./blockchainService');
-    blockchainService = new BlockchainService(contractAddress, abi, privateKey, rpcUrl);
-    console.log('BlockchainService initialized');
+    // 创建 provider（只读）
+    const provider = new ethers.JsonRpcProvider(rpcUrl);
     
-    // 启动 EventListener
-    const EventListener = require('./eventListener');
-    eventListener = new EventListener(blockchainService);
-    eventListener.start().catch(err => {
-        console.error('EventListener failed to start:', err.message);
-    });
+    // 如果有私钥，创建带签名的服务
+    if (contractAddress && privateKey) {
+        const BlockchainService = require('./blockchainService');
+        blockchainService = new BlockchainService(contractAddress, abi, privateKey, rpcUrl);
+        console.log('BlockchainService initialized with signer');
+    } else {
+        console.log('BlockchainService not initialized (missing PRIVATE_KEY)');
+    }
+    
+    // 启动 EventListener（只需要 provider，不需要私钥）
+    try {
+        const EventListener = require('./eventListener');
+        eventListener = new EventListener(contractAddress, rpcUrl, abi);
+        eventListener.start().catch(err => {
+            console.error('EventListener failed to start:', err.message);
+        });
+    } catch (error) {
+        console.error('Failed to start EventListener:', error);
+    }
     
     return blockchainService;
 }

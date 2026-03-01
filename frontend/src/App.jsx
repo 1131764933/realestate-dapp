@@ -303,7 +303,8 @@ const MyBookings = () => {
       fetch(`http://localhost:3000/api/bookings/user/${lowerAddress}`)
         .then(res => res.json())
         .then(data => {
-          setBookings(data);
+          // 后端返回 { source, count, data } 格式
+          setBookings(data.data || data);
           setLoading(false);
         })
         .catch(err => {

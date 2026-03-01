@@ -1,15 +1,23 @@
 const IndexerState = require('../models/IndexerState');
 const Booking = require('../models/Booking');
+const { ethers } = require('ethers');
 
 /**
  * EventListener - 区块链事件监听器 (Indexer)
  * 监听合约事件并同步到 MongoDB
  */
 class EventListener {
-    constructor(blockchainService) {
-        this.provider = blockchainService.provider;
-        this.contract = blockchainService.contract;
+    /**
+     * @param {string} contractAddress - 合约地址
+     * @param {string} rpcUrl - RPC URL
+     * @param {string[]} abi - 合约 ABI
+     */
+    constructor(contractAddress, rpcUrl, abi) {
+        this.contractAddress = contractAddress;
+        this.provider = new ethers.JsonRpcProvider(rpcUrl);
+        this.contract = new ethers.Contract(contractAddress, abi, this.provider);
         this.isRunning = false;
+        console.log('EventListener created with address:', contractAddress);
     }
 
     /**
@@ -158,7 +166,7 @@ class EventListener {
                     propertyId: Number(propertyId),
                     startDate: Number(startDate),
                     endDate: Number(endDate),
-                    amount: BigInt(amount),
+                    amount: amount.toString(), // 转为字符串存储
                     status: statusMap[Number(status)],
                     txHash: event.log.transactionHash,
                     updatedAt: new Date()
