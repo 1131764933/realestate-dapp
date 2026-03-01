@@ -3,15 +3,10 @@ const Booking = require('../models/Booking');
 const { ethers } = require('ethers');
 
 /**
- * EventListener - 区块链事件监听器 (Indexer)
- * 监听合约事件并同步到 MongoDB
+ * EventListener - 区块链事件监听器
+ * 只监听新事件，自动同步到 MongoDB
  */
 class EventListener {
-    /**
-     * @param {string} contractAddress - 合约地址
-     * @param {string} rpcUrl - RPC URL
-     * @param {string[]} abi - 合约 ABI
-     */
     constructor(contractAddress, rpcUrl, abi) {
         this.contractAddress = contractAddress;
         this.provider = new ethers.JsonRpcProvider(rpcUrl);
@@ -20,9 +15,6 @@ class EventListener {
         console.log('EventListener created with address:', contractAddress);
     }
 
-    /**
-     * 启动事件监听
-     */
     async start() {
         if (this.isRunning) {
             console.log('EventListener already running');
@@ -30,28 +22,32 @@ class EventListener {
         }
         
         this.isRunning = true;
-        console.log('Indexer started...');
+        console.log('EventListener started - listening for new events only');
         
-        try {
-            // 处理历史事件
-            await this.processPastEvents();
-            
-            // 监听新事件
-            this.contract.on('BookingCreated', this.handleBookingCreated.bind(this));
-            this.contract.on('BookingCancelled', this.handleBookingCancelled.bind(this));
-            this.contract.on('BookingCompleted', this.handleBookingCompleted.bind(this));
-            this.contract.on('PropertyAdded', this.handlePropertyAdded.bind(this));
-            
-            console.log('Event listeners registered');
-        } catch (error) {
-            console.error('Failed to start EventListener:', error);
-            this.isRunning = false;
-        }
+        // 监听 BookingCreated - 新预订
+        this.contract.on('BookingCreated', async (...args) => {
+            const event = args[args.length - 2];
+            const log = args[args.length - 1];
+            await this.handleBookingCreated(event, log);
+        });
+        
+        // 监听 BookingCancelled - 取消预订
+        this.contract.on('BookingCancelled', async (...args) => {
+            const event = args[args.length - 2];
+            const log = args[args.length - 1];
+            await this.handleBookingCancelled(event, log);
+        });
+        
+        // 监听 BookingCompleted - 完成预订
+        this.contract.on('BookingCompleted', async (...args) => {
+            const event = args[args.length - 2];
+            const log = args[args.length - 1];
+            await this.handleBookingCompleted(event, log);
+        });
+        
+        console.log('Event listeners registered');
     }
 
-    /**
-     * 停止事件监听
-     */
     async stop() {
         if (!this.isRunning) return;
         
@@ -59,105 +55,28 @@ class EventListener {
         this.contract.removeAllListeners('BookingCreated');
         this.contract.removeAllListeners('BookingCancelled');
         this.contract.removeAllListeners('BookingCompleted');
-        this.contract.removeAllListeners('PropertyAdded');
-        console.log('Indexer stopped');
+        console.log('EventListener stopped');
     }
 
-    /**
-     * 处理历史事件（断点续传）
-     */
-    async processPastEvents() {
-        const lastBlock = await this.getLastProcessedBlock();
-        const latestBlock = await this.provider.getBlockNumber();
-        
-        console.log(`Processing events from block ${lastBlock} to ${latestBlock}`);
-        
-        // 从上次区块+1开始处理
-        const fromBlock = lastBlock + 1;
-        
-        if (fromBlock > latestBlock) {
-            console.log('No new blocks to process');
-            return;
-        }
-        
-        // 查询历史事件
+    // 处理新预订事件
+    async handleBookingCreated(event, log) {
         try {
-            const createdEvents = await this.contract.queryFilter(
-                'BookingCreated', fromBlock, latestBlock
-            );
+            // ethers v6 事件参数在 args 中
+            const args = event.args || log.args;
+            if (!args) return;
             
-            for (const event of createdEvents) {
-                await this.handleBookingCreated(event);
-            }
-
-            const cancelledEvents = await this.contract.queryFilter(
-                'BookingCancelled', fromBlock, latestBlock
-            );
+            const { bookingId, user, propertyId, startDate, endDate, amount, status } = args;
             
-            for (const event of cancelledEvents) {
-                await this.handleBookingCancelled(event);
-            }
-
-            const completedEvents = await this.contract.queryFilter(
-                'BookingCompleted', fromBlock, latestBlock
-            );
+            const statusMap = {
+                0: 'PENDING',
+                1: 'CONFIRMED',
+                2: 'CANCELLED',
+                3: 'COMPLETED',
+                4: 'FAILED'
+            };
             
-            for (const event of completedEvents) {
-                await this.handleBookingCompleted(event);
-            }
+            console.log(`[Event] BookingCreated: ID=${bookingId}, User=${user}`);
             
-            // 更新处理的区块号
-            await this.updateLastProcessedBlock(latestBlock);
-            console.log(`Processed ${createdEvents.length} BookingCreated events`);
-        } catch (error) {
-            console.error('Error processing past events:', error);
-        }
-    }
-
-    /**
-     * 获取上次处理的区块号
-     */
-    async getLastProcessedBlock() {
-        let state = await IndexerState.findOne({ name: 'default' });
-        if (!state) {
-            state = await IndexerState.create({ 
-                name: 'default', 
-                lastProcessedBlock: 0 
-            });
-        }
-        return state.lastProcessedBlock;
-    }
-
-    /**
-     * 更新处理的区块号
-     */
-    async updateLastProcessedBlock(blockNumber) {
-        await IndexerState.findOneAndUpdate(
-            { name: 'default' },
-            { 
-                lastProcessedBlock: blockNumber,
-                updatedAt: new Date()
-            }
-        );
-    }
-
-    /**
-     * 处理 BookingCreated 事件
-     */
-    async handleBookingCreated(event) {
-        const { bookingId, user, propertyId, startDate, endDate, amount, status } = event.args;
-        
-        console.log(`BookingCreated: bookingId=${bookingId}, user=${user}, propertyId=${propertyId}`);
-        
-        const statusMap = {
-            0: 'PENDING',
-            1: 'SUCCESS',
-            2: 'CANCELLED',
-            3: 'COMPLETED',
-            4: 'FAILED'
-        };
-        
-        try {
             await Booking.findOneAndUpdate(
                 { bookingId: Number(bookingId) },
                 {
@@ -166,29 +85,30 @@ class EventListener {
                     propertyId: Number(propertyId),
                     startDate: Number(startDate),
                     endDate: Number(endDate),
-                    amount: amount.toString(), // 转为字符串存储
-                    status: statusMap[Number(status)],
-                    txHash: event.log.transactionHash,
+                    amount: amount.toString(),
+                    status: statusMap[Number(status)] || 'PENDING',
+                    txHash: log.transactionHash,
                     updatedAt: new Date()
                 },
                 { upsert: true, new: true }
             );
-
-            // 更新索引器状态
-            await this.updateLastProcessedBlock(event.blockNumber);
+            
+            console.log(`[Synced] Booking ${bookingId} created in DB`);
         } catch (error) {
-            console.error('Error handling BookingCreated:', error);
+            console.error('[Error] BookingCreated:', error.message);
         }
     }
 
-    /**
-     * 处理 BookingCancelled 事件
-     */
-    async handleBookingCancelled(event) {
-        const { bookingId, status } = event.args;
-        console.log(`BookingCancelled: bookingId=${bookingId}`);
-        
+    // 处理取消预订事件
+    async handleBookingCancelled(event, log) {
         try {
+            const args = event.args || log.args;
+            if (!args) return;
+            
+            const { bookingId } = args;
+            
+            console.log(`[Event] BookingCancelled: ID=${bookingId}`);
+            
             await Booking.findOneAndUpdate(
                 { bookingId: Number(bookingId) },
                 { 
@@ -197,20 +117,22 @@ class EventListener {
                 }
             );
             
-            await this.updateLastProcessedBlock(event.blockNumber);
+            console.log(`[Synced] Booking ${bookingId} cancelled in DB`);
         } catch (error) {
-            console.error('Error handling BookingCancelled:', error);
+            console.error('[Error] BookingCancelled:', error.message);
         }
     }
 
-    /**
-     * 处理 BookingCompleted 事件
-     */
-    async handleBookingCompleted(event) {
-        const { bookingId, status } = event.args;
-        console.log(`BookingCompleted: bookingId=${bookingId}`);
-        
+    // 处理完成预订事件
+    async handleBookingCompleted(event, log) {
         try {
+            const args = event.args || log.args;
+            if (!args) return;
+            
+            const { bookingId } = args;
+            
+            console.log(`[Event] BookingCompleted: ID=${bookingId}`);
+            
             await Booking.findOneAndUpdate(
                 { bookingId: Number(bookingId) },
                 { 
@@ -219,21 +141,10 @@ class EventListener {
                 }
             );
             
-            await this.updateLastProcessedBlock(event.blockNumber);
+            console.log(`[Synced] Booking ${bookingId} completed in DB`);
         } catch (error) {
-            console.error('Error handling BookingCompleted:', error);
+            console.error('[Error] BookingCompleted:', error.message);
         }
-    }
-
-    /**
-     * 处理 PropertyAdded 事件
-     */
-    async handlePropertyAdded(event) {
-        const { propertyId, price } = event.args;
-        console.log(`PropertyAdded: propertyId=${propertyId}, price=${price}`);
-        
-        // 可以在这里同步房源数据到 MongoDB
-        // 目前房源数据存储在链上，通过前端查询
     }
 }
 

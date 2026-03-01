@@ -1,16 +1,80 @@
 const express = require('express');
 const router = express.Router();
 const Booking = require('../models/Booking');
-const blockchainService = require('../services/blockchainService');
+const { getBlockchainService } = require('../services/index');
+const { ethers } = require('ethers');
 
 // 区块链配置
-const CONTRACT_ADDRESS = '0xB7f8BC63BbcaD18155201308C8f3540b07f84F5e';
+const CONTRACT_ADDRESS = '0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9';
 const RPC_URL = 'http://localhost:8545';
 
 const BOOKING_ABI = [
     "function getBooking(uint256 bookingId) view returns (address user, uint256 propertyId, uint256 startDate, uint256 endDate, uint256 amount, uint8 status)",
     "function bookingCount() view returns (uint256)"
 ];
+
+// 同步所有 bookings 从区块链到数据库
+router.post('/sync-from-chain', async (req, res) => {
+    try {
+        const provider = new ethers.JsonRpcProvider(RPC_URL);
+        const contract = new ethers.Contract(CONTRACT_ADDRESS, BOOKING_ABI, provider);
+        
+        const count = await contract.bookingCount();
+        const statusMap = ['PENDING', 'CONFIRMED', 'CANCELLED', 'COMPLETED', 'FAILED'];
+        
+        let synced = 0;
+        let errors = 0;
+        let cleaned = 0;
+        
+        // 1. 先同步链上存在的 bookings (1 到 count)
+        for (let i = 1; i <= Number(count); i++) {
+            try {
+                const booking = await contract.getBooking(i);
+                const owner = booking.user;
+                
+                if (owner === '0x0000000000000000000000000000000000000000') {
+                    await Booking.findOneAndUpdate(
+                        { bookingId: i },
+                        { status: 'DELETED', updatedAt: new Date() },
+                        { upsert: false }
+                    );
+                    synced++;
+                } else {
+                    await Booking.findOneAndUpdate(
+                        { bookingId: i },
+                        {
+                            walletAddress: owner.toLowerCase(),
+                            propertyId: Number(booking.propertyId),
+                            startDate: Number(booking.startDate),
+                            endDate: Number(booking.endDate),
+                            amount: booking.amount.toString(),
+                            status: statusMap[Number(booking.status)],
+                            updatedAt: new Date()
+                        },
+                        { upsert: true }
+                    );
+                    synced++;
+                }
+            } catch (e) {
+                errors++;
+            }
+        }
+        
+        // 2. 清理链上不存在的 bookings (ID > count)
+        // 这些是"幽灵" bookings - 前端保存了但链上交易失败
+        const result = await Booking.deleteMany({
+            bookingId: { $gt: Number(count) },
+            status: { $ne: 'DELETED' }  // 只删除未标记为 DELETED 的
+        });
+        cleaned = result.deletedCount;
+        
+        console.log(`Sync complete: synced=${synced}, errors=${errors}, cleaned=${cleaned}`);
+        
+        res.json({ success: true, synced, errors, cleaned });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
 
 // 从区块链获取当前预订数量
 async function getBookingCount() {
@@ -125,13 +189,11 @@ router.post('/', async (req, res) => {
     try {
         const { propertyId, startDate, endDate, amount, walletAddress, txHash } = req.body;
         
-        // 获取区块链上的当前预订数量和MongoDB中最大的bookingId，取最大值+1
+        // 只使用链上的 booking count，不参考 MongoDB
         const chainCount = await getBookingCount();
-        const maxBookingInDb = await Booking.findOne().sort({ bookingId: -1 });
-        const maxBookingId = maxBookingInDb ? maxBookingInDb.bookingId : 0;
-        const newBookingId = Math.max(Number(chainCount), maxBookingId) + 1;
+        const newBookingId = Number(chainCount) + 1;
         
-        console.log(`Creating booking: chainCount=${chainCount}, maxDbId=${maxBookingId}, newId=${newBookingId}`);
+        console.log(`Creating booking: chainCount=${chainCount}, newId=${newBookingId}`);
         
         const booking = await Booking.create({
             bookingId: newBookingId,
@@ -186,8 +248,8 @@ router.post('/:id/cancel', async (req, res) => {
         const bookingId = parseInt(req.params.id);
         const { walletAddress } = req.body;
         
-        // 调用合约取消
-        const tx = await blockchainService.cancelBooking(bookingId, walletAddress);
+        // 注意：区块链交易已经从前端发送，这里只需要更新数据库
+        // 已经在链上执行了 cancelBooking，所以直接更新数据库
         
         // 更新数据库
         await Booking.findOneAndUpdate(
@@ -198,11 +260,14 @@ router.post('/:id/cancel', async (req, res) => {
             }
         );
         
+        console.log(`Booking ${bookingId} marked as CANCELLED in database`);
+        
         res.json({ 
             success: true, 
-            txHash: tx.hash 
+            message: 'Booking cancelled successfully'
         });
     } catch (error) {
+        console.error('Error cancelling booking:', error);
         res.status(500).json({ error: error.message });
     }
 });

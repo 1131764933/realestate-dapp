@@ -11,7 +11,7 @@ function initBlockchainService() {
     console.log('PRIVATE_KEY:', process.env.PRIVATE_KEY ? 'set' : 'missing');
     console.log('RPC_URL:', process.env.RPC_URL);
     
-    const contractAddress = process.env.CONTRACT_ADDRESS || '0xB7f8BC63BbcaD18155201308C8f3540b07f84F5e';
+    const contractAddress = process.env.CONTRACT_ADDRESS || '0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9';
     const privateKey = process.env.PRIVATE_KEY;
     const rpcUrl = process.env.RPC_URL || 'http://localhost:8545';
     
@@ -45,7 +45,7 @@ function initBlockchainService() {
         console.log('BlockchainService not initialized (missing PRIVATE_KEY)');
     }
     
-    // 启动 EventListener（只需要 provider，不需要私钥）
+    // 启动 EventListener - 只监听新事件
     try {
         const EventListener = require('./eventListener');
         eventListener = new EventListener(contractAddress, rpcUrl, abi);

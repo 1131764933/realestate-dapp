@@ -5,7 +5,7 @@ import '@rainbow-me/rainbowkit/styles.css';
 import React from 'react';
 import { MantineProvider, AppShell, Group, Button, Text, Container, Title, Badge, Card, Image, Grid, Loader, Center, Stack, Alert } from '@mantine/core';
 import { BrowserRouter, Routes, Route, Link, useNavigate, useParams } from 'react-router-dom';
-import { WagmiProvider, useAccount, useConnect, http, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { WagmiProvider, useAccount, useConnect, http, useWriteContract, useWaitForTransactionReceipt, useChainId } from 'wagmi';
 import { mainnet, sepolia, hardhat } from 'wagmi/chains';
 import { RainbowKitProvider, ConnectButton, darkTheme, getDefaultConfig } from '@rainbow-me/rainbowkit';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -13,17 +13,20 @@ import { ethers } from 'ethers';
 import axios from 'axios';
 import { CONTRACT_CONFIG, CONTRACT_ABI } from './config/contracts';
 
+// Hardhat chain ID
+const HARDHAT_CHAIN_ID = hardhat.id;
+
 // 创建 QueryClient
 const queryClient = new QueryClient();
 
-// 创建 Wagmi 配置
+// 创建 Wagmi 配置 - 使用不会CORS的RPC
 const config = getDefaultConfig({
   appName: 'Real Estate DApp',
   projectId: 'YOUR_PROJECT_ID',
   chains: [mainnet, sepolia, hardhat],
   transports: {
-    [mainnet.id]: http(),
-    [sepolia.id]: http(),
+    [mainnet.id]: http('https://rpc.ankr.com/eth'),  // 替换默认的 eth.merkle.io
+    [sepolia.id]: http('https://rpc.ankr.com/eth'),
     [hardhat.id]: http('http://127.0.0.1:8545'),
   },
 });
@@ -95,8 +98,9 @@ const PropertyDetail = () => {
   const navigate = useNavigate();
   const { address, isConnected } = useAccount();
   const { connect } = useConnect();
+  const chainId = useChainId();
   const { writeContract, data: hash, isPending, error: writeError } = useWriteContract();
-  const { isConfirmed, isLoading: isConfirming } = useWaitForTransactionReceipt({ 
+  const { isLoading: isConfirming, isSuccess, isError } = useWaitForTransactionReceipt({ 
     hash: hash,
     query: {
       enabled: !!hash,
@@ -123,50 +127,57 @@ const PropertyDetail = () => {
       });
   }, [id]);
 
-  // 监听交易状态
+  // 监听交易状态 - 必须等交易成功才保存到数据库
   React.useEffect(() => {
-    console.log("📊 Transaction Status:", { hash, isPending, isConfirmed, isConfirming, writeError });
+    console.log("📊 Transaction Status:", { hash, isPending, isConfirming, isSuccess, isError, writeError });
     
-    if (isPending) {
-      setBooking(true);
-    } else if (!isPending && hash && !isConfirming && !writeError) {
-      // 交易完成（没有pending了，且没有错误）- 认为成功
-      // 即使 isConfirmed 是 undefined，只要交易完成就算成功
+    // 1. 交易被拒绝或有错误
+    if (writeError) {
+      setTxError(writeError.message || 'Transaction failed');
+      setBooking(false);
+      return;
+    }
+
+    // 2. 交易确认成功 - 不再提前写入 MongoDB，让 Indexer 或 My Bookings 页面从链上同步
+    if (isSuccess && hash) {
+      console.log("✅ Transaction confirmed successfully!");
+      console.log("📋 Booking will be synced by Indexer. Redirecting to My Bookings...");
+      
       if (!showSuccess) {
-        console.log("✅ Transaction completed (fallback success)");
         setShowSuccess(true);
         setBooking(false);
         
-        // 保存到后端
-        if (property && dates.length > 0 && hash) {
-          axios.post('http://localhost:3000/api/bookings', {
-            propertyId: parseInt(id),
-            startDate: dates[0].toISOString(),
-            endDate: dates[1].toISOString(),
-            amount: property.price,
-            walletAddress: address?.toLowerCase(),
-            txHash: hash
-          }).then(() => {
-            console.log("✅ Saved to backend");
-          }).catch(err => {
-            console.error("❌ Failed to save:", err);
-          });
-        }
-        
-        // 2秒后跳转
+        // 不再提前写入 MongoDB！直接跳转
+        // My Bookings 页面会从链上同步数据
         setTimeout(() => {
           navigate('/my-bookings');
         }, 2000);
       }
-    } else if (writeError) {
-      setTxError(writeError.message || 'Transaction failed');
-      setBooking(false);
+      return;
     }
-  }, [isPending, isConfirming, writeError, hash]);
+
+    // 3. 交易失败
+    if (isError) {
+      setTxError('Transaction failed on blockchain');
+      setBooking(false);
+      return;
+    }
+
+    // 4. 交易 pending 中
+    if (isPending || isConfirming) {
+      setBooking(true);
+    }
+  }, [isPending, isConfirming, isSuccess, isError, writeError, hash]);
 
   const handleBook = async () => {
     if (!isConnected) {
       connect();
+      return;
+    }
+
+    // 检查是否连接到正确的网络
+    if (chainId !== HARDHAT_CHAIN_ID) {
+      setTxError(`Please switch to Hardhat network (chainId: ${HARDHAT_CHAIN_ID}) before booking. Current chainId: ${chainId}`);
       return;
     }
 
@@ -177,11 +188,23 @@ const PropertyDetail = () => {
 
     if (!property) return;
 
-    setBooking(true);
-    setTxError('');
-
+    // 检查日期是否是未来日期（至少1小时后）
+    const now = Math.floor(Date.now() / 1000);
     const startDate = Math.floor(dates[0].getTime() / 1000);
     const endDate = Math.floor(dates[1].getTime() / 1000);
+    
+    if (startDate <= now + 3600) { // 至少1小时后
+      setTxError('Check-in date must be at least 1 hour in the future. Please select a later date.');
+      return;
+    }
+    
+    if (endDate <= startDate) {
+      setTxError('Check-out date must be after check-in date');
+      return;
+    }
+
+    setBooking(true);
+    setTxError('');
 
     try {
       writeContract({
@@ -189,7 +212,8 @@ const PropertyDetail = () => {
         abi: CONTRACT_ABI,
         functionName: 'book',
         args: [BigInt(id), BigInt(startDate), BigInt(endDate), BigInt(property.price)],
-        value: BigInt(property.price)
+        value: BigInt(property.price),
+        gas: 300000n
       });
     } catch (err) {
       console.error(err);
@@ -205,13 +229,6 @@ const PropertyDetail = () => {
       setBooking(false);
     }
   }, [writeError]);
-
-  React.useEffect(() => {
-    if (!isPending && !isConfirming && !isConfirmed && hash) {
-      // 用户拒绝或失败
-      setBooking(false);
-    }
-  }, [isPending, isConfirming, isConfirmed, hash]);
 
   if (loading) return <Center h="60vh"><Loader size="lg" /></Center>;
   if (!property) return <Container><Text>Property not found</Text></Container>;
@@ -293,18 +310,31 @@ const PropertyDetail = () => {
 // 我的预订组件
 const MyBookings = () => {
   const { address, isConnected } = useAccount();
+  const chainId = useChainId();
+  const { writeContractAsync, data: hash, isPending, error: writeError } = useWriteContract();
+  const { isLoading: isConfirming, isSuccess, isError } = useWaitForTransactionReceipt({ 
+    hash: hash,
+    query: { enabled: !!hash }
+  });
+  
   const [bookings, setBookings] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
+  const [cancellingId, setCancellingId] = React.useState(null);
+  const [refreshKey, setRefreshKey] = React.useState(0); // 用于强制刷新
 
-  React.useEffect(() => {
+  // 只从数据库读取 - 不查区块链
+  const fetchBookings = async () => {
     if (isConnected && address) {
-      // 使用小写地址查询（与数据库存储格式一致）
       const lowerAddress = address.toLowerCase();
-      fetch(`http://localhost:3000/api/bookings/user/${lowerAddress}`)
+      // 添加时间戳强制刷新，避免缓存
+      const url = `http://localhost:3000/api/bookings/user/${lowerAddress}?_t=${Date.now()}`;
+      fetch(url)
         .then(res => res.json())
-        .then(data => {
-          // 后端返回 { source, count, data } 格式
-          setBookings(data.data || data);
+        .then(async data => {
+          const bookingsData = data.data || data;
+          
+          // 直接使用数据库返回的数据（后端 Indexer 是单一数据源）
+          setBookings(bookingsData);
           setLoading(false);
         })
         .catch(err => {
@@ -314,7 +344,126 @@ const MyBookings = () => {
     } else {
       setLoading(false);
     }
-  }, [isConnected, address]);
+  };
+
+  React.useEffect(() => {
+    fetchBookings();
+  }, [isConnected, address, refreshKey]);
+
+  // 监听取消交易状态 - 必须等交易确认成功才更新数据库
+  React.useEffect(() => {
+    console.log("📊 Cancel tx status:", { hash, isPending, isConfirming, isSuccess, isError, cancellingId });
+    
+    // 1. 交易失败或有错误
+    if (isError || writeError) {
+      console.error("❌ Cancel transaction failed");
+      setCancellingId(null);
+      return;
+    }
+
+    // 2. 交易确认成功 - 更新数据库并重置状态
+    if (isSuccess && cancellingId) {
+      console.log("✅ Cancel transaction confirmed, updating database...");
+      
+      // 先重置状态，避免UI卡住
+      const bookingIdToCancel = cancellingId;
+      setCancellingId(null);
+      
+      // 强制刷新标记
+      setRefreshKey(k => k + 1);
+      
+      // 调用后端 API 更新数据库状态
+      fetch(`http://localhost:3000/api/bookings/${bookingIdToCancel}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ walletAddress: address?.toLowerCase() })
+      })
+      .then(res => res.json())
+      .then(data => {
+        console.log("✅ Database updated:", data);
+        // 延迟一点刷新，确保数据库已更新
+        setTimeout(() => fetchBookings(), 500);
+      })
+      .catch(err => {
+        console.error("❌ Failed to update database:", err);
+        fetchBookings(); // 即使失败也刷新
+      });
+      
+      return;
+    }
+
+    // 3. 交易 pending 中
+    if (isPending || isConfirming) {
+      // 等待确认
+    }
+  }, [isPending, isConfirming, isSuccess, isError, writeError, hash, cancellingId, address, fetchBookings]);
+
+  const handleCancel = async (bookingId, bookingOwner) => {
+    if (!isConnected) {
+      alert('Please connect wallet first');
+      return;
+    }
+
+    // 检查是否连接到正确的网络
+    if (chainId !== HARDHAT_CHAIN_ID) {
+      alert(`Please switch to Hardhat network (chainId: ${HARDHAT_CHAIN_ID}) before cancelling. Current chainId: ${chainId}`);
+      return;
+    }
+
+    // 检查当前钱包是否是 owner
+    if (bookingOwner && bookingOwner.toLowerCase() !== address?.toLowerCase()) {
+      alert(`You are not the owner of this booking.\n\nOwner: ${bookingOwner}\nYour address: ${address}`);
+      return;
+    }
+
+    if (!confirm('Are you sure you want to cancel this booking?')) {
+      return;
+    }
+
+    setCancellingId(bookingId);
+    
+    try {
+      console.log("📤 Cancelling booking:", bookingId);
+      
+      // 直接调用合约取消 - 设置合理的 gas 限制
+      await writeContractAsync({
+        address: CONTRACT_CONFIG.address,
+        abi: CONTRACT_ABI,
+        functionName: 'cancelBooking',
+        args: [BigInt(bookingId)],
+        gas: 200000n
+      });
+      
+      console.log("✅ Cancel transaction submitted");
+      
+    } catch (err) {
+      console.error("❌ Cancel error:", err);
+      
+      const errorMsg = err.message || '';
+      
+      // 用户拒绝
+      if (errorMsg.includes('User rejected') || errorMsg.includes('rejected the request')) {
+        console.log("👤 User rejected the transaction");
+        alert("Transaction was rejected by user");
+      }
+      // 合约 revert - 不是 owner
+      else if (errorMsg.includes('Not booking owner')) {
+        console.log("❌ Not the owner of this booking");
+        alert("Error: You are not the owner of this booking");
+      }
+      // 合约 revert - 不能取消
+      else if (errorMsg.includes('Cannot cancel')) {
+        console.log("❌ Cannot cancel this booking");
+        alert("Error: This booking cannot be cancelled");
+      }
+      // 其他错误
+      else {
+        alert("Error: " + errorMsg.substring(0, 100));
+      }
+      
+      setCancellingId(null);
+    }
+  };
 
   const statusColors = {
     PENDING: 'yellow',
@@ -348,7 +497,7 @@ const MyBookings = () => {
               <Card shadow="md" padding="lg" radius="md" withBorder>
                 <Stack gap="sm">
                   <Group justify="space-between">
-                    <Text fw={600}>Property #{booking.propertyId}</Text>
+                    <Text fw={600}>🏠 Property #{booking.propertyId} (ID: {booking.bookingId})</Text>
                     <Badge color={statusColors[booking.status] || 'gray'}>
                       {booking.status}
                     </Badge>
@@ -357,6 +506,21 @@ const MyBookings = () => {
                   <Text size="sm">📅 Check-in: {new Date(booking.startDate * 1000).toLocaleDateString()}</Text>
                   <Text size="sm">📅 Check-out: {new Date(booking.endDate * 1000).toLocaleDateString()}</Text>
                   <Text fw={500}>💰 Price: {Number(booking.amount) / 1e18} ETH</Text>
+                  <Text size="xs" c="dimmed">Owner: {booking.walletAddress}</Text>
+                  
+                  {/* 只对 PENDING/CONFIRMED 状态显示取消按钮 */}
+                  {(booking.status === 'PENDING' || booking.status === 'CONFIRMED') && (
+                    <Button 
+                      color="red" 
+                      variant="outline" 
+                      size="sm"
+                      loading={cancellingId === booking.bookingId}
+                      onClick={() => handleCancel(booking.bookingId, booking.walletAddress)}
+                      disabled={cancellingId !== null}
+                    >
+                      {cancellingId === booking.bookingId ? 'Cancelling...' : 'Cancel Booking'}
+                    </Button>
+                  )}
                 </Stack>
               </Card>
             </Grid.Col>
