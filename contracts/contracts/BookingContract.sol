@@ -323,8 +323,47 @@ contract BookingContract is ERC721URIStorage, Ownable, ReentrancyGuard {
         uint256 bookingId = nftToBooking[tokenId];
         Booking memory booking = bookings[bookingId];
 
-        // 返回 IPFS 元数据地址
-        return string(abi.encodePacked("ipfs://QmXYZ/metadata_", uint2str(tokenId), ".json"));
+        // 获取状态字符串
+        string memory statusStr;
+        if (booking.status == BookingStatus.Pending) {
+            statusStr = "Pending";
+        } else if (booking.status == BookingStatus.Confirmed) {
+            statusStr = "Confirmed";
+        } else if (booking.status == BookingStatus.Cancelled) {
+            statusStr = "Cancelled";
+        } else if (booking.status == BookingStatus.Completed) {
+            statusStr = "Completed";
+        } else {
+            statusStr = "Unknown";
+        }
+
+        // 构建完整 JSON 元数据 (简化版)
+        string memory json = string(abi.encodePacked(
+            '{"name":"Booking NFT #', uint2str(bookingId), '",',
+            '"description":"Real Estate Booking NFT - Property #', uint2str(booking.propertyId), '",',
+            '"image":"https://picsum.photos/seed/', uint2str(bookingId), '/400/300",',
+            '"attributes":['
+        ));
+
+        // Property ID
+        json = string(abi.encodePacked(json,
+            '{"trait_type":"Property ID","display_type":"number","value":', uint2str(booking.propertyId), '},'
+        ));
+
+        // Amount in ETH (除以 10^18)
+        json = string(abi.encodePacked(json,
+            '{"trait_type":"Amount ETH","display_type":"number","value":', uint2str(booking.amount / 1 ether), '},'
+        ));
+
+        // Status
+        json = string(abi.encodePacked(json,
+            '{"trait_type":"Status","value":"', statusStr, '"}'
+        ));
+
+        json = string(abi.encodePacked(json, ']}'));
+
+        // 返回 data URI
+        return string(abi.encodePacked("data:application/json,", json));
     }
 
     // ============ 辅助函数 ============

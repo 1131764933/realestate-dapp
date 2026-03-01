@@ -3,7 +3,7 @@ const router = express.Router();
 const Property = require('../models/Property');
 
 // 简单的硬编码配置（用于测试）
-const CONTRACT_ADDRESS = '0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9';
+const CONTRACT_ADDRESS = '0x7a2088a1bFc9d81c55368AE168C2C02570cB814F';
 const RPC_URL = 'http://localhost:8545';
 
 const ABI = [

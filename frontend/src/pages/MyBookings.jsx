@@ -130,14 +130,35 @@ const MyBookings = () => {
                                         </Text>
                                     )}
 
+                                    {/* NFT 信息展示 */}
+                                    {booking.nftTokenId && (
+                                        <Alert color="green" variant="light" mt="sm">
+                                            <Text size="sm" fw={600}>🎉 NFT 已铸造!</Text>
+                                            <Text size="xs" c="dimmed" mt={5}>
+                                                Token ID: {booking.nftTokenId}
+                                            </Text>
+                                            <Text 
+                                                size="xs" 
+                                                c="blue" 
+                                                style={{ cursor: 'pointer' }} 
+                                                mt={5}
+                                                onClick={() => window.open(`https://testnets.opensea.io/assets/localhost/${CONTRACT_CONFIG.address}/${booking.nftTokenId}`, '_blank')}
+                                            >
+                                                📎 在 OpenSea 查看
+                                            </Text>
+                                        </Alert>
+                                    )}
+
                                     <Group mt="md">
-                                        {booking.status === 'SUCCESS' && (
+                                        {/* 允许 PENDING 和 SUCCESS 状态都可以 Mint NFT */}
+                                        {(booking.status === 'PENDING' || booking.status === 'SUCCESS') && !booking.nftTokenId && (
                                             <Button 
                                                 size="sm" 
+                                                color="green"
                                                 onClick={() => handleMintNFT(booking.bookingId)}
                                                 loading={processing === booking.bookingId}
                                             >
-                                                Mint NFT
+                                                🎨 Mint NFT
                                             </Button>
                                         )}
                                         
