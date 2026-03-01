@@ -4,8 +4,8 @@
 import abi from './abi.json';
 
 export const CONTRACT_CONFIG = {
-    // 本地测试网部署地址
-    address: '0x5FbDB2315678afecb367f032d93F642f64180aa3',
+    // 本地测试网部署地址 (2026-03-01 更新)
+    address: '0xB7f8BC63BbcaD18155201308C8f3540b07f84F5e',
     network: 'localhost'
 };
 

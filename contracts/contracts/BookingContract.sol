@@ -308,6 +308,13 @@ contract BookingContract is ERC721URIStorage, Ownable, ReentrancyGuard {
     }
 
     /**
+     * @notice 获取当前预订数量
+     */
+    function bookingCount() public view returns (uint256) {
+        return _nextBookingId - 1;
+    }
+
+    /**
      * @notice 获取 NFT 元数据
      */
     function tokenURI(uint256 tokenId) public view override returns (string memory) {

@@ -15,7 +15,7 @@ const propertySchema = new mongoose.Schema({
     imageUrl: String,
     location: String,
     price: { 
-        type: mongoose.Schema.Types.BigInt, 
+        type: String, 
         required: true 
     },
     owner: String,

@@ -4,12 +4,22 @@ const Booking = require('../models/Booking');
 const blockchainService = require('../services/blockchainService');
 
 // 区块链配置
-const CONTRACT_ADDRESS = '0x5FbDB2315678afecb367f032d93F642f64180aa3';
+const CONTRACT_ADDRESS = '0xB7f8BC63BbcaD18155201308C8f3540b07f84F5e';
 const RPC_URL = 'http://localhost:8545';
 
 const BOOKING_ABI = [
-    "function getBooking(uint256 bookingId) view returns (address user, uint256 propertyId, uint256 startDate, uint256 endDate, uint256 amount, uint8 status)"
+    "function getBooking(uint256 bookingId) view returns (address user, uint256 propertyId, uint256 startDate, uint256 endDate, uint256 amount, uint8 status)",
+    "function bookingCount() view returns (uint256)"
 ];
+
+// 从区块链获取当前预订数量
+async function getBookingCount() {
+    const { ethers } = require('ethers');
+    const provider = new ethers.JsonRpcProvider(RPC_URL);
+    const contract = new ethers.Contract(CONTRACT_ADDRESS, BOOKING_ABI, provider);
+    const count = await contract.bookingCount();
+    return Number(count); // 转为 Number
+}
 
 // 从区块链获取用户的所有预订
 async function getAllBookingsFromBlockchain(userAddress) {
@@ -53,13 +63,27 @@ router.get('/user/:address', async (req, res) => {
         // 先从 MongoDB 获取
         let bookings = await Booking.find({ walletAddress }).sort({ createdAt: -1 });
         
+        // 标记数据来源
+        let source = 'mongodb';
+        
         // 如果 MongoDB 为空，从区块链获取
         if (bookings.length === 0) {
             console.log('MongoDB empty, fetching from blockchain for:', walletAddress);
             bookings = await getAllBookingsFromBlockchain(walletAddress);
+            source = 'blockchain';
+        } else {
+            // 转换 BigInt 为字符串
+            bookings = bookings.map(b => ({
+                ...b.toObject(),
+                amount: b.amount?.toString()
+            }));
         }
         
-        res.json(bookings);
+        res.json({
+            source,
+            count: bookings.length,
+            data: bookings
+        });
     } catch (error) {
         console.error('Error fetching bookings:', error);
         res.status(500).json({ error: error.message });
@@ -78,11 +102,11 @@ router.get('/:id', async (req, res) => {
                 const chainBooking = await blockchainService.getBooking(bookingId);
                 res.json({
                     bookingId,
-                    propertyId: chainBooking.propertyId,
-                    startDate: chainBooking.startDate,
-                    endDate: chainBooking.endDate,
+                    propertyId: Number(chainBooking.propertyId),
+                    startDate: Number(chainBooking.startDate),
+                    endDate: Number(chainBooking.endDate),
                     amount: chainBooking.amount.toString(),
-                    status: ['PENDING', 'CONFIRMED', 'CANCELLED', 'COMPLETED', 'FAILED'][chainBooking.status],
+                    status: ['PENDING', 'CONFIRMED', 'CANCELLED', 'COMPLETED', 'FAILED'][Number(chainBooking.status)],
                     user: chainBooking.user
                 });
             } catch {
@@ -101,14 +125,20 @@ router.post('/', async (req, res) => {
     try {
         const { propertyId, startDate, endDate, amount, walletAddress, txHash } = req.body;
         
-        // 链上预订由前端直接调用，这里只记录到数据库
-        // 前端会在链上交易成功后调用此 API
+        // 获取区块链上的当前预订数量和MongoDB中最大的bookingId，取最大值+1
+        const chainCount = await getBookingCount();
+        const maxBookingInDb = await Booking.findOne().sort({ bookingId: -1 });
+        const maxBookingId = maxBookingInDb ? maxBookingInDb.bookingId : 0;
+        const newBookingId = Math.max(Number(chainCount), maxBookingId) + 1;
+        
+        console.log(`Creating booking: chainCount=${chainCount}, maxDbId=${maxBookingId}, newId=${newBookingId}`);
         
         const booking = await Booking.create({
+            bookingId: newBookingId,
             propertyId,
             startDate: Math.floor(new Date(startDate).getTime() / 1000),
             endDate: Math.floor(new Date(endDate).getTime() / 1000),
-            amount: BigInt(amount),
+            amount: amount.toString(), // 转为字符串存储
             walletAddress: walletAddress.toLowerCase(),
             txHash,
             status: 'PENDING'
@@ -116,6 +146,7 @@ router.post('/', async (req, res) => {
         
         res.status(201).json(booking);
     } catch (error) {
+        console.error('Error creating booking:', error);
         res.status(500).json({ error: error.message });
     }
 });

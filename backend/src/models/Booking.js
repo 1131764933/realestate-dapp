@@ -31,7 +31,7 @@ const bookingSchema = new mongoose.Schema({
         required: true 
     },
     amount: { 
-        type: mongoose.Schema.Types.BigInt, 
+        type: String, 
         required: true 
     },
     txHash: { 
