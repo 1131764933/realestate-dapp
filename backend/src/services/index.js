@@ -1,9 +1,15 @@
 // 服务实例导出
+require('dotenv').config();
 let blockchainService = null;
 let eventListener = null;
 
 function initBlockchainService() {
     const { ethers } = require('ethers');
+    
+    console.log('Initializing BlockchainService...');
+    console.log('CONTRACT_ADDRESS:', process.env.CONTRACT_ADDRESS);
+    console.log('PRIVATE_KEY:', process.env.PRIVATE_KEY ? 'set' : 'missing');
+    console.log('RPC_URL:', process.env.RPC_URL);
     
     const contractAddress = process.env.CONTRACT_ADDRESS;
     const privateKey = process.env.PRIVATE_KEY;

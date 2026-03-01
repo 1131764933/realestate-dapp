@@ -5,23 +5,22 @@ import '@rainbow-me/rainbowkit/styles.css';
 import React from 'react';
 import { MantineProvider, AppShell, Group, Button, Text, Container, Title, Badge, Card, Image, Grid, Loader, Center, Stack, Alert } from '@mantine/core';
 import { BrowserRouter, Routes, Route, Link, useNavigate, useParams } from 'react-router-dom';
-import { WagmiProvider, createConfig, http, useAccount, useConnect, useDisconnect } from 'wagmi';
+import { WagmiProvider, useAccount, useConnect, http } from 'wagmi';
 import { mainnet, sepolia } from 'wagmi/chains';
-import { RainbowKitProvider, ConnectButton, darkTheme } from '@rainbow-me/rainbowkit';
+import { RainbowKitProvider, ConnectButton, darkTheme, getDefaultConfig } from '@rainbow-me/rainbowkit';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import axios from 'axios';
-import { ethers } from 'ethers';
-import { CONTRACT_CONFIG, CONTRACT_ABI } from './config/contracts';
 
 // 创建 QueryClient
 const queryClient = new QueryClient();
 
 // 创建 Wagmi 配置
-const config = createConfig({
+const config = getDefaultConfig({
+  appName: 'Real Estate DApp',
+  projectId: 'YOUR_PROJECT_ID',
   chains: [mainnet, sepolia],
   transports: {
     [mainnet.id]: http(),
-    [sepolia.id]: http('http://localhost:8545'),
+    [sepolia.id]: http(),
   },
 });
 
