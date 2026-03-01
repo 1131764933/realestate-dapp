@@ -3,13 +3,65 @@ const router = express.Router();
 const Booking = require('../models/Booking');
 const blockchainService = require('../services/blockchainService');
 
+// 区块链配置
+const CONTRACT_ADDRESS = '0x5FbDB2315678afecb367f032d93F642f64180aa3';
+const RPC_URL = 'http://localhost:8545';
+
+const BOOKING_ABI = [
+    "function getBooking(uint256 bookingId) view returns (address user, uint256 propertyId, uint256 startDate, uint256 endDate, uint256 amount, uint8 status)"
+];
+
+// 从区块链获取用户的所有预订
+async function getAllBookingsFromBlockchain(userAddress) {
+    const { ethers } = require('ethers');
+    const provider = new ethers.JsonRpcProvider(RPC_URL);
+    const contract = new ethers.Contract(CONTRACT_ADDRESS, BOOKING_ABI, provider);
+    
+    const bookings = [];
+    const userAddr = userAddress.toLowerCase();
+    
+    // 尝试查询 booking ID 1-100
+    for (let i = 1; i <= 100; i++) {
+        try {
+            const booking = await contract.getBooking(i);
+            if (booking.user.toLowerCase() === userAddr && booking.propertyId > 0) {
+                bookings.push({
+                    bookingId: i,
+                    propertyId: Number(booking.propertyId),
+                    startDate: Number(booking.startDate),
+                    endDate: Number(booking.endDate),
+                    amount: booking.amount.toString(),
+                    status: ['PENDING', 'CONFIRMED', 'CANCELLED', 'COMPLETED', 'FAILED'][Number(booking.status)],
+                    walletAddress: booking.user,
+                    txHash: ''
+                });
+            }
+        } catch (e) {
+            // Booking 不存在，跳过
+            if (e.message.includes('execution reverted')) break;
+        }
+    }
+    
+    return bookings;
+}
+
 // 获取用户的所有预订
 router.get('/user/:address', async (req, res) => {
     try {
         const walletAddress = req.params.address.toLowerCase();
-        const bookings = await Booking.find({ walletAddress }).sort({ createdAt: -1 });
+        
+        // 先从 MongoDB 获取
+        let bookings = await Booking.find({ walletAddress }).sort({ createdAt: -1 });
+        
+        // 如果 MongoDB 为空，从区块链获取
+        if (bookings.length === 0) {
+            console.log('MongoDB empty, fetching from blockchain for:', walletAddress);
+            bookings = await getAllBookingsFromBlockchain(walletAddress);
+        }
+        
         res.json(bookings);
     } catch (error) {
+        console.error('Error fetching bookings:', error);
         res.status(500).json({ error: error.message });
     }
 });

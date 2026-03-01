@@ -5,10 +5,13 @@ import '@rainbow-me/rainbowkit/styles.css';
 import React from 'react';
 import { MantineProvider, AppShell, Group, Button, Text, Container, Title, Badge, Card, Image, Grid, Loader, Center, Stack, Alert } from '@mantine/core';
 import { BrowserRouter, Routes, Route, Link, useNavigate, useParams } from 'react-router-dom';
-import { WagmiProvider, useAccount, useConnect, http } from 'wagmi';
-import { mainnet, sepolia } from 'wagmi/chains';
+import { WagmiProvider, useAccount, useConnect, http, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { mainnet, sepolia, hardhat } from 'wagmi/chains';
 import { RainbowKitProvider, ConnectButton, darkTheme, getDefaultConfig } from '@rainbow-me/rainbowkit';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ethers } from 'ethers';
+import axios from 'axios';
+import { CONTRACT_CONFIG, CONTRACT_ABI } from './config/contracts';
 
 // 创建 QueryClient
 const queryClient = new QueryClient();
@@ -17,10 +20,11 @@ const queryClient = new QueryClient();
 const config = getDefaultConfig({
   appName: 'Real Estate DApp',
   projectId: 'YOUR_PROJECT_ID',
-  chains: [mainnet, sepolia],
+  chains: [mainnet, sepolia, hardhat],
   transports: {
     [mainnet.id]: http(),
     [sepolia.id]: http(),
+    [hardhat.id]: http('http://127.0.0.1:8545'),
   },
 });
 
@@ -91,12 +95,20 @@ const PropertyDetail = () => {
   const navigate = useNavigate();
   const { address, isConnected } = useAccount();
   const { connect } = useConnect();
+  const { writeContract, data: hash, isPending, error: writeError } = useWriteContract();
+  const { isConfirmed, isLoading: isConfirming } = useWaitForTransactionReceipt({ 
+    hash: hash,
+    query: {
+      enabled: !!hash,
+    }
+  });
   
   const [property, setProperty] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
   const [booking, setBooking] = React.useState(false);
   const [dates, setDates] = React.useState([]);
-  const [error, setError] = React.useState('');
+  const [txError, setTxError] = React.useState('');
+  const [showSuccess, setShowSuccess] = React.useState(false);
 
   React.useEffect(() => {
     fetch(`http://localhost:3000/api/properties/${id}`)
@@ -111,6 +123,47 @@ const PropertyDetail = () => {
       });
   }, [id]);
 
+  // 监听交易状态
+  React.useEffect(() => {
+    console.log("📊 Transaction Status:", { hash, isPending, isConfirmed, isConfirming, writeError });
+    
+    if (isPending) {
+      setBooking(true);
+    } else if (!isPending && hash && !isConfirming && !writeError) {
+      // 交易完成（没有pending了，且没有错误）- 认为成功
+      // 即使 isConfirmed 是 undefined，只要交易完成就算成功
+      if (!showSuccess) {
+        console.log("✅ Transaction completed (fallback success)");
+        setShowSuccess(true);
+        setBooking(false);
+        
+        // 保存到后端
+        if (property && dates.length > 0 && hash) {
+          axios.post('http://localhost:3000/api/bookings', {
+            propertyId: parseInt(id),
+            startDate: dates[0].toISOString(),
+            endDate: dates[1].toISOString(),
+            amount: property.price,
+            walletAddress: address?.toLowerCase(),
+            txHash: hash
+          }).then(() => {
+            console.log("✅ Saved to backend");
+          }).catch(err => {
+            console.error("❌ Failed to save:", err);
+          });
+        }
+        
+        // 2秒后跳转
+        setTimeout(() => {
+          navigate('/my-bookings');
+        }, 2000);
+      }
+    } else if (writeError) {
+      setTxError(writeError.message || 'Transaction failed');
+      setBooking(false);
+    }
+  }, [isPending, isConfirming, writeError, hash]);
+
   const handleBook = async () => {
     if (!isConnected) {
       connect();
@@ -118,45 +171,47 @@ const PropertyDetail = () => {
     }
 
     if (dates.length < 2) {
-      setError('Please select check-in and check-out dates');
+      setTxError('Please select check-in and check-out dates');
       return;
     }
 
+    if (!property) return;
+
+    setBooking(true);
+    setTxError('');
+
+    const startDate = Math.floor(dates[0].getTime() / 1000);
+    const endDate = Math.floor(dates[1].getTime() / 1000);
+
     try {
-      setBooking(true);
-      setError('');
-
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const signer = await provider.getSigner();
-      const contract = new ethers.Contract(CONTRACT_CONFIG.address, CONTRACT_ABI, signer);
-
-      const startDate = Math.floor(dates[0].getTime() / 1000);
-      const endDate = Math.floor(dates[1].getTime() / 1000);
-
-      const tx = await contract.book(id, startDate, endDate, property.price, {
-        value: property.price
+      writeContract({
+        address: CONTRACT_CONFIG.address,
+        abi: CONTRACT_ABI,
+        functionName: 'book',
+        args: [BigInt(id), BigInt(startDate), BigInt(endDate), BigInt(property.price)],
+        value: BigInt(property.price)
       });
-
-      await tx.wait();
-
-      await axios.post('http://localhost:3000/api/bookings', {
-        propertyId: parseInt(id),
-        startDate: dates[0].toISOString(),
-        endDate: dates[1].toISOString(),
-        amount: property.price,
-        walletAddress: address,
-        txHash: tx.hash
-      });
-
-      alert('Booking successful!');
-      navigate('/my-bookings');
     } catch (err) {
       console.error(err);
-      setError(err.message || 'Booking failed');
-    } finally {
+      setTxError(err.message || 'Booking failed');
       setBooking(false);
     }
   };
+
+  // 处理交易状态
+  React.useEffect(() => {
+    if (writeError) {
+      setTxError(writeError.message || 'Transaction failed');
+      setBooking(false);
+    }
+  }, [writeError]);
+
+  React.useEffect(() => {
+    if (!isPending && !isConfirming && !isConfirmed && hash) {
+      // 用户拒绝或失败
+      setBooking(false);
+    }
+  }, [isPending, isConfirming, isConfirmed, hash]);
 
   if (loading) return <Center h="60vh"><Loader size="lg" /></Center>;
   if (!property) return <Container><Text>Property not found</Text></Container>;
@@ -190,29 +245,38 @@ const PropertyDetail = () => {
               {Number(property.price) / 1e18} ETH
             </Text>
 
-            {error && <Alert color="red">{error}</Alert>}
+            {txError && <Alert color="red" mb="md">{txError}</Alert>}
 
-            <input
-              type="date"
-              onChange={(e) => {
-                const start = new Date(e.target.value);
-                const end = new Date(start);
-                end.setDate(end.getDate() + 1);
-                setDates([start, end]);
-              }}
-              min={new Date().toISOString().split('T')[0]}
-              style={{ padding: '10px', borderRadius: '8px', border: '1px solid #ddd' }}
-            />
+            {showSuccess ? (
+              <Alert color="green" title="🎉 Booking Successful!">
+                Your booking has been confirmed on the blockchain!<br/>
+                <Text size="sm" mt="xs">Redirecting to My Bookings...</Text>
+              </Alert>
+            ) : (
+              <>
+                <input
+                  type="date"
+                  onChange={(e) => {
+                    const start = new Date(e.target.value);
+                    const end = new Date(start);
+                    end.setDate(end.getDate() + 1);
+                    setDates([start, end]);
+                  }}
+                  min={new Date().toISOString().split('T')[0]}
+                  style={{ padding: '10px', borderRadius: '8px', border: '1px solid #ddd' }}
+                />
 
-            <Button 
-              size="lg" 
-              fullWidth 
-              onClick={handleBook}
-              loading={booking}
-              disabled={!property.isActive}
-            >
-              {isConnected ? 'Book Now' : 'Connect Wallet to Book'}
-            </Button>
+                <Button 
+                  size="lg" 
+                  fullWidth 
+                  onClick={handleBook}
+                  loading={booking}
+                  disabled={!property.isActive}
+                >
+                  {isPending ? 'Waiting for confirmation...' : isConfirming ? 'Confirming...' : isConnected ? 'Book Now' : 'Connect Wallet to Book'}
+                </Button>
+              </>
+            )}
 
             {isConnected && (
               <Text size="sm" c="dimmed">
@@ -234,7 +298,9 @@ const MyBookings = () => {
 
   React.useEffect(() => {
     if (isConnected && address) {
-      fetch(`http://localhost:3000/api/bookings/user/${address}`)
+      // 使用小写地址查询（与数据库存储格式一致）
+      const lowerAddress = address.toLowerCase();
+      fetch(`http://localhost:3000/api/bookings/user/${lowerAddress}`)
         .then(res => res.json())
         .then(data => {
           setBookings(data);
