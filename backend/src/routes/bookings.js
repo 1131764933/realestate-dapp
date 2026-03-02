@@ -3,6 +3,8 @@ const router = express.Router();
 const Booking = require('../models/Booking');
 const { getBlockchainService } = require('../services/index');
 const { ethers } = require('ethers');
+const { optionalTransaction } = require('../utils/transaction');
+const { shouldRetryOnBlockchainError, callWithRetry } = require('../utils/retry');
 
 // 区块链配置
 const CONTRACT_ADDRESS = '0xB0D4afd8879eD9F52b28595d31B441D079B2Ca07';
@@ -260,7 +262,7 @@ router.post('/', async (req, res) => {
     }
 });
 
-// 铸造 NFT
+// 铸造 NFT（带事务支持 + 重试机制）
 router.post('/:id/mint-nft', async (req, res) => {
     try {
         const bookingId = parseInt(req.params.id);
@@ -271,27 +273,51 @@ router.post('/:id/mint-nft', async (req, res) => {
             throw new Error('Blockchain service not initialized');
         }
         
-        // 调用合约铸造 NFT，获取返回的 tokenId
-        const result = await blockchainService.mintNFT(bookingId, walletAddress);
-        const { tokenId, receipt } = result;
-        
-        // 使用真实的 tokenId 更新数据库
-        const booking = await Booking.findOneAndUpdate(
-            { bookingId },
-            { 
-                nftTokenId: tokenId,
-                updatedAt: new Date() 
+        // 使用事务确保链上操作和数据库操作的一致性
+        const result = await optionalTransaction(
+            async (session) => {
+                // 1. 调用合约铸造 NFT，获取返回的 tokenId
+                const mintResult = await blockchainService.mintNFT(bookingId, walletAddress);
+                const { tokenId, receipt } = mintResult;
+                
+                // 2. 使用事务更新数据库
+                const booking = await Booking.findOneAndUpdate(
+                    { bookingId },
+                    { 
+                        nftTokenId: tokenId,
+                        updatedAt: new Date() 
+                    },
+                    { new: true, session }
+                );
+                
+                return { tokenId, receipt, booking };
             },
-            { new: true }
+            // 如果不支持事务，使用原来的逻辑
+            async () => {
+                const mintResult = await blockchainService.mintNFT(bookingId, walletAddress);
+                const { tokenId, receipt } = mintResult;
+                
+                const booking = await Booking.findOneAndUpdate(
+                    { bookingId },
+                    { 
+                        nftTokenId: tokenId,
+                        updatedAt: new Date() 
+                    },
+                    { new: true }
+                );
+                
+                return { tokenId, receipt, booking };
+            }
         );
         
         res.json({ 
             success: true, 
-            txHash: receipt.hash,
-            tokenId,
-            booking 
+            txHash: result.receipt.hash,
+            tokenId: result.tokenId,
+            booking: result.booking
         });
     } catch (error) {
+        console.error('Mint NFT failed:', error.message);
         res.status(500).json({ error: error.message });
     }
 });
@@ -326,29 +352,54 @@ router.post('/:id/cancel', async (req, res) => {
     }
 });
 
-// 完成预订
+// 完成预订（带事务支持 + 重试机制）
 router.post('/:id/complete', async (req, res) => {
     try {
         const bookingId = parseInt(req.params.id);
         const { walletAddress } = req.body;
         
-        // 调用合约完成
-        const tx = await blockchainService.completeBooking(bookingId, walletAddress);
+        const blockchainService = getBlockchainService();
+        if (!blockchainService) {
+            throw new Error('Blockchain service not initialized');
+        }
         
-        // 更新数据库
-        await Booking.findOneAndUpdate(
-            { bookingId },
-            { 
-                status: 'COMPLETED',
-                updatedAt: new Date() 
+        // 使用事务确保一致性
+        const txResult = await optionalTransaction(
+            async (session) => {
+                // 1. 调用合约完成
+                const tx = await blockchainService.completeBooking(bookingId, walletAddress);
+                
+                // 2. 更新数据库
+                await Booking.findOneAndUpdate(
+                    { bookingId },
+                    { 
+                        status: 'COMPLETED',
+                        updatedAt: new Date() 
+                    },
+                    { session }
+                );
+                
+                return tx;
+            },
+            async () => {
+                const tx = await blockchainService.completeBooking(bookingId, walletAddress);
+                await Booking.findOneAndUpdate(
+                    { bookingId },
+                    { 
+                        status: 'COMPLETED',
+                        updatedAt: new Date() 
+                    }
+                );
+                return tx;
             }
         );
         
         res.json({ 
             success: true, 
-            txHash: tx.hash 
+            txHash: txResult.hash 
         });
     } catch (error) {
+        console.error('Complete booking failed:', error.message);
         res.status(500).json({ error: error.message });
     }
 });

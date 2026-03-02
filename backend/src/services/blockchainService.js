@@ -1,7 +1,9 @@
 const { ethers } = require('ethers');
+const { callWithBlockchainRetry } = require('../utils/retry');
 
 /**
  * BlockchainService - 区块链交互服务
+ * 包含重试机制处理网络波动和区块链拥堵
  */
 class BlockchainService {
     /**
@@ -47,55 +49,63 @@ class BlockchainService {
     }
 
     /**
-     * 预订房源
+     * 预订房源（带重试机制）
      */
     async book(propertyId, startDate, endDate, amount, fromAddress) {
-        const contract = this.getSignedContract();
-        const tx = await contract.book(propertyId, startDate, endDate, amount, {
-            from: fromAddress,
-            value: amount
-        });
-        return await tx.wait();
+        return callWithBlockchainRetry(async () => {
+            const contract = this.getSignedContract();
+            const tx = await contract.book(propertyId, startDate, endDate, amount, {
+                from: fromAddress,
+                value: amount
+            });
+            return await tx.wait();
+        }, 3);
     }
 
     /**
-     * 取消预订
+     * 取消预订（带重试机制）
      */
     async cancelBooking(bookingId, fromAddress) {
-        const contract = this.getSignedContract();
-        const tx = await contract.cancelBooking(bookingId, { from: fromAddress });
-        return await tx.wait();
+        return callWithBlockchainRetry(async () => {
+            const contract = this.getSignedContract();
+            const tx = await contract.cancelBooking(bookingId, { from: fromAddress });
+            return await tx.wait();
+        }, 3);
     }
 
     /**
-     * 完成预订
+     * 完成预订（带重试机制）
      */
     async completeBooking(bookingId, fromAddress) {
-        const contract = this.getSignedContract();
-        const tx = await contract.completeBooking(bookingId, { from: fromAddress });
-        return await tx.wait();
+        return callWithBlockchainRetry(async () => {
+            const contract = this.getSignedContract();
+            const tx = await contract.completeBooking(bookingId, { from: fromAddress });
+            return await tx.wait();
+        }, 3);
     }
 
     /**
-     * 铸造 NFT
+     * 铸造 NFT（带重试机制）
      */
     async mintNFT(bookingId, fromAddress) {
-        const contract = this.getSignedContract();
-        
-        // 先查询当前 tokenId 数量
-        const startTokenId = await contract.nextTokenId();
-        
-        const tx = await contract.mintBookingNFT(fromAddress, bookingId, { from: fromAddress });
-        const receipt = await tx.wait();
-        
-        // 查询新的 tokenId
-        const endTokenId = await contract.nextTokenId();
-        const tokenId = endTokenId - 1n;
-        
-        return {
-            receipt,
-            tokenId: Number(tokenId)
-        };
+        return callWithBlockchainRetry(async () => {
+            const contract = this.getSignedContract();
+            
+            // 先查询当前 tokenId 数量
+            const startTokenId = await contract.nextTokenId();
+            
+            const tx = await contract.mintBookingNFT(fromAddress, bookingId, { from: fromAddress });
+            const receipt = await tx.wait();
+            
+            // 查询新的 tokenId
+            const endTokenId = await contract.nextTokenId();
+            const tokenId = endTokenId - 1n;
+            
+            return {
+                receipt,
+                tokenId: Number(tokenId)
+            };
+        }, 3);
     }
 
     /**
