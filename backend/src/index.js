@@ -6,6 +6,7 @@ const cors = require('cors');
 const { initBlockchainService, getBlockchainService } = require('./services');
 const propertiesRouter = require('./routes/properties');
 const bookingsRouter = require('./routes/bookings');
+const usersRouter = require('./routes/users');
 
 const app = express();
 
@@ -16,6 +17,7 @@ app.use(express.json());
 // API Routes
 app.use('/api/properties', propertiesRouter);
 app.use('/api/bookings', bookingsRouter);
+app.use('/api/users', usersRouter);
 
 // Health check
 app.get('/health', (req, res) => {

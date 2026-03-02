@@ -9,9 +9,11 @@ import { WagmiProvider, useAccount, useConnect, http, useWriteContract, useWaitF
 import { mainnet, sepolia, hardhat } from 'wagmi/chains';
 import { RainbowKitProvider, ConnectButton, darkTheme, getDefaultConfig } from '@rainbow-me/rainbowkit';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { useAuth0 } from '@auth0/auth0-react';
 import { ethers } from 'ethers';
 import axios from 'axios';
 import { CONTRACT_CONFIG, CONTRACT_ABI } from './config/contracts';
+import { setAuthToken } from './config/axios';
 import MyBookings from './pages/MyBookings';
 
 // Hardhat chain ID
@@ -311,6 +313,34 @@ const PropertyDetail = () => {
 // Header 组件
 const Header = () => {
   const navigate = useNavigate();
+  const { loginWithRedirect, logout, isAuthenticated, user, getAccessTokenSilently } = useAuth0();
+  
+  // 监听 Auth0 登录，获取 token 并保存
+  React.useEffect(() => {
+    if (isAuthenticated) {
+      const saveToken = async () => {
+        try {
+          // 添加 audience 获取 token
+          const token = await getAccessTokenSilently({
+            audience: 'https://realestate-api'
+          });
+          setAuthToken(token);
+          console.log('Auth0 token saved:', token.substring(0, 20) + '...');
+          
+          // 调用后端创建/获取用户（带 token）
+          await axios.post('http://localhost:3000/api/users/me', {}, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          console.log('User synced with backend');
+        } catch (e) {
+          console.error('Error saving auth0 token:', e);
+        }
+      };
+      saveToken();
+    } else {
+      setAuthToken(null);
+    }
+  }, [isAuthenticated, getAccessTokenSilently]);
   
   return (
     <AppShell.Header>
@@ -331,6 +361,31 @@ const Header = () => {
           <Button variant="subtle" onClick={() => navigate('/my-bookings')}>
             My Bookings
           </Button>
+          
+          {/* Auth0 登录/登出按钮 */}
+          {isAuthenticated ? (
+            <Group gap="xs">
+              <Text size="sm" c="dimmed">{user?.email}</Text>
+              <Button 
+                variant="light" 
+                color="red"
+                size="sm"
+                onClick={() => logout({ logoutParams: { returnTo: window.location.origin } })}
+              >
+                Logout
+              </Button>
+            </Group>
+          ) : (
+            <Button 
+              variant="light" 
+              color="blue"
+              size="sm"
+              onClick={() => loginWithRedirect()}
+            >
+              Login
+            </Button>
+          )}
+          
           <ConnectButton />
         </Group>
       </Group>
