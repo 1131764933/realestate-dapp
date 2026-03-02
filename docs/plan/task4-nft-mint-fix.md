@@ -33,6 +33,54 @@
 
 ---
 
+## 🔥 突发问题（支线5-11）
+
+### 支线5：ABI 导入格式错误
+- **现象**：`abi.filter is not a function`
+- **原因**：导入的 ABI 是完整对象 `{abi: [...]}`，而 wagmi 需要纯数组
+- **解决**：
+```javascript
+// 错误
+import abi from './abi.json';
+// 正确
+import abiData from './abi.json';
+const abi = abiData.abi || abiData;
+```
+
+### 支线6：合约地址未更新
+- **现象**：同步 bookings 返回 0 条
+- **原因**：后端 bookings.js 用了旧合约地址
+- **解决**：更新 `CONTRACT_ADDRESS` 为新部署地址 `0x70e0bA845a1A0F2DA3359C97E0285013525FFC49`
+
+### 支线7：App.jsx 重复 MyBookings 定义
+- **现象**：`The symbol "MyBookings" has already been declared`
+- **原因**：既有 `import MyBookings`，又在 App.jsx 本地定义了 `const MyBookings = () => {}`
+- **发现**：每次恢复代码都会触发
+- **解决**：删除本地的 MyBookings 定义，只保留 import
+
+### 支线8：blockchainService 未定义
+- **现象**：mint-nft API 报错 `blockchainService is not defined`
+- **原因**：getBlockchainService() 返回 null（ PRIVATE_KEY 未配置）
+- **解决**：
+1. 添加 nextTokenId 到 ABI
+2. 路由中调用 getBlockchainService()
+
+### 支线9：MetaMask 输入密码
+- **现象**：每次交易都要求输入密码
+- **原因**：MetaMask 安全设置，不是代码 bug
+- **解决**：在 MetaMask 设置中关闭 "Require password to unlock wallet"
+
+### 支线10：OpenSea 测试网废弃
+- **现象**：OpenSea 不再支持测试网
+- **解决**：改用 Etherscan 链接
+
+### 支线11：前端错误提示太长
+- **现象**：显示原始错误信息如 "User rejected the request..."
+- **需求**：用户取消时不显示错误
+- **解决**：检测 "User rejected" 关键字，用户取消时不设置错误
+
+---
+
 ### 阶段二：修复 tokenURI
 
 #### 问题
@@ -80,6 +128,13 @@ function tokenURI(uint256 tokenId) public view override returns (string memory) 
 | 2 | 缺少展示组件 | 代码审查 | 添加 NFT 信息 + OpenSea 链接 |
 | 3 | 取消时 NFT 处理 | 业务分析 | 保留 NFT，更新状态 |
 | 4 | 铸造状态限制 | 代码审查 | 改为 PENDING/CONFIRMED |
+| 5 | ABI 导入格式错误 | 报错 `abi.filter is not a function` | 提取 abi 数组 |
+| 6 | 合约地址未更新 | 同步返回 0 条 | 更新后端地址 |
+| 7 | 重复 MyBookings 定义 | 编译报错 | 删除本地定义 |
+| 8 | blockchainService 未定义 | mint-nft API 报错 | 添加 nextTokenId 到 ABI |
+| 9 | MetaMask 输入密码 | 每次交易都要密码 | MetaMask 设置关闭 |
+| 10 | OpenSea 测试网废弃 | 无法查看 NFT | 改用 Etherscan 链接 |
+| 11 | 错误提示太长 | 显示原始错误信息 | 用户取消不显示错误 |
 
 ---
 
@@ -126,12 +181,26 @@ function tokenURI(uint256 tokenId) public view override returns (string memory) 
 
 | 文件 | 修改内容 |
 |------|---------|
-| `contracts/contracts/BookingContract.sol` | 完善 tokenURI 元数据 |
-| `frontend/src/config/contracts.js` | 更新合约地址 |
-| `frontend/src/pages/MyBookings.jsx` | 添加 NFT 展示 |
-| `backend/src/routes/bookings.js` | 更新合约地址 |
+| `contracts/contracts/BookingContract.sol` | 完善 tokenURI 元数据，添加 nextTokenId() |
+| `frontend/src/config/contracts.js` | 更新合约地址，修复 ABI 导入 |
+| `frontend/src/pages/MyBookings.jsx` | 添加 NFT 展示和状态 |
+| `frontend/src/App.jsx` | 添加 MyBookings import，修复错误处理 |
+| `backend/src/routes/bookings.js` | 更新合约地址，添加 nextTokenId |
 | `backend/src/routes/properties.js` | 更新合约地址 |
-| `backend/src/services/index.js` | 更新合约地址 |
+| `backend/src/services/index.js` | 添加 nextTokenId 到 ABI |
+
+---
+
+## 📋 当前状态
+
+### 合约地址
+```
+0x70e0bA845a1A0F2DA3359C97E0285013525FFC49
+```
+
+### 数据统计
+- 预订数量：6 个
+- 已铸造 NFT：2 个 (Token ID: 2, 3)
 
 ---
 
