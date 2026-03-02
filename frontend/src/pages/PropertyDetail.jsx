@@ -35,14 +35,20 @@ const PropertyDetail = () => {
     };
 
     const handleBook = async () => {
+        console.log('handleBook called', { account, dateRange, property });
+        
         if (!account) {
-            // 提示用户连接钱包
-            alert('Please connect your wallet first');
+            alert('Wallet not connected! Please connect wallet first.');
             return;
         }
 
         if (!dateRange || dateRange.length < 2) {
             setErrorMessage('Please select date range');
+            return;
+        }
+        
+        if (!property) {
+            alert('Property not loaded');
             return;
         }
 
@@ -51,9 +57,17 @@ const PropertyDetail = () => {
             setTxStatus('pending');
             setErrorMessage('');
             
+            console.log('Starting booking...', { account, windowEth: !!window.ethereum });
+            
+            if (!window.ethereum) {
+                throw new Error('MetaMask not installed!');
+            }
+            
             // 直接使用 window.ethereum 获取 signer
             const ethersProvider = new ethers.BrowserProvider(window.ethereum);
             const signer = await ethersProvider.getSigner();
+            
+            console.log('Signer:', await signer.getAddress());
             
             const contract = new ethers.Contract(
                 CONTRACT_CONFIG.address,
@@ -65,12 +79,18 @@ const PropertyDetail = () => {
             const endDate = Math.floor(dateRange[1].getTime() / 1000);
             const amount = property.price;
 
+            console.log('Calling contract.book...', { id, startDate, endDate, amount });
+            
             // 调用合约预订
             const tx = await contract.book(id, startDate, endDate, amount, {
                 value: amount
             });
 
+            console.log('Transaction sent:', tx.hash);
+            
             await tx.wait();
+
+            console.log('Transaction confirmed');
 
             // 保存到后端
             await axios.post('http://localhost:3000/api/bookings', {
@@ -89,7 +109,11 @@ const PropertyDetail = () => {
         } catch (error) {
             console.error('Booking failed:', error);
             setTxStatus('failed');
-            setErrorMessage(error.message || 'Booking failed');
+            // 显示更详细的错误信息
+            let errorMsg = error.message || 'Booking failed';
+            if (error.reason) errorMsg = error.reason;
+            if (error.data?.message) errorMsg = error.data.message;
+            setErrorMessage(errorMsg);
         } finally {
             setBooking(false);
         }
