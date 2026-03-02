@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Container, Title, Card, Text, Badge, Button, Group, Stack, Loader, Center, Grid, Alert } from '@mantine/core';
-import { useAccount } from 'wagmi';
+import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { useLocation } from 'react-router-dom';
 import axios from 'axios';
-import { CONTRACT_CONFIG } from '../config/contracts';
+import { CONTRACT_CONFIG, CONTRACT_ABI } from '../config/contracts';
 
 const statusColors = {
     PENDING: 'yellow',
@@ -16,24 +16,60 @@ const statusColors = {
 const MyBookings = () => {
     const { address: account, isConnected } = useAccount();
     const location = useLocation();
+    const { writeContract, data: hash, isPending: isWriting, isError: isWriteError, error: writeError } = useWriteContract();
+    const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({ 
+        hash: hash 
+    });
     const [bookings, setBookings] = useState([]);
     const [loading, setLoading] = useState(true);
     const [processing, setProcessing] = useState(null);
     const [error, setError] = useState('');
+    const [success, setSuccess] = useState('');
 
     useEffect(() => {
         if (account) {
-            fetchBookings();
+            const loadBookings = async () => {
+                try {
+                    await axios.post('http://localhost:3000/api/bookings/sync-from-chain');
+                } catch (err) {
+                    console.error('Sync error:', err);
+                }
+                fetchBookings();
+            };
+            loadBookings();
         }
     }, [account, location.state?.refresh]);
 
-    // 手动同步并刷新
+    // 监听交易确认
+    useEffect(() => {
+        if (isConfirmed && hash) {
+            console.log('Transaction confirmed:', hash);
+            setSuccess('Booking cancelled successfully!');
+            axios.post('http://localhost:3000/api/bookings/sync-from-chain').then(() => {
+                fetchBookings();
+            });
+            setProcessing(null);
+            setTimeout(() => setSuccess(''), 3000);
+        }
+    }, [isConfirmed, hash]);
+
+    // 监听写入错误
+    useEffect(() => {
+        if (isWriteError && writeError) {
+            console.error('Write error:', writeError);
+            let errorMsg = writeError.message || 'Failed to cancel booking';
+            if (errorMsg.includes('rejected') || errorMsg.includes('denied')) {
+                errorMsg = 'You rejected the transaction';
+            }
+            setError(errorMsg);
+            setProcessing(null);
+        }
+    }, [isWriteError, writeError]);
+
     const handleRefresh = async () => {
         setLoading(true);
         try {
-            // 先同步
             await axios.post('http://localhost:3000/api/bookings/sync-from-chain');
-            // 再获取
             await fetchBookings();
         } catch (err) {
             console.error('Refresh error:', err);
@@ -43,7 +79,6 @@ const MyBookings = () => {
     const fetchBookings = async () => {
         try {
             const response = await axios.get(`http://localhost:3000/api/bookings/user/${account}`);
-            // API 返回格式: { source, count, data: [...] }
             const bookingsData = response.data?.data || response.data || [];
             setBookings(Array.isArray(bookingsData) ? bookingsData : []);
         } catch (error) {
@@ -55,20 +90,24 @@ const MyBookings = () => {
     };
 
     const handleCancel = async (bookingId) => {
-        try {
-            setProcessing(bookingId);
-            setError('');
-            
-            await axios.post(`http://localhost:3000/api/bookings/${bookingId}/cancel`, {
-                walletAddress: account
-            });
-            
-            fetchBookings();
-        } catch (err) {
-            setError(err.response?.data?.error || err.message);
-        } finally {
-            setProcessing(null);
+        if (!account) {
+            setError('Please connect your wallet first');
+            return;
         }
+        
+        setProcessing(bookingId);
+        setError('');
+        setSuccess('');
+        
+        console.log('Cancelling booking:', bookingId);
+        
+        // 使用 wagmi 发送交易
+        writeContract({
+            address: CONTRACT_CONFIG.address,
+            abi: CONTRACT_ABI,
+            functionName: 'cancelBooking',
+            args: [BigInt(bookingId)],
+        });
     };
 
     const handleMintNFT = async (bookingId) => {
@@ -117,7 +156,13 @@ const MyBookings = () => {
             
             {error && (
                 <Alert color="red" mb="md" onClose={() => setError('')} withCloseButton>
-                    {error}
+                    <Text>{error}</Text>
+                </Alert>
+            )}
+            
+            {success && (
+                <Alert color="green" mb="md" onClose={() => setSuccess('')} withCloseButton>
+                    <Text>{success}</Text>
                 </Alert>
             )}
             
@@ -153,7 +198,6 @@ const MyBookings = () => {
                                         </Text>
                                     )}
 
-                                    {/* NFT 信息展示 */}
                                     {booking.nftTokenId && (
                                         <Alert color={booking.status === 'CANCELLED' ? 'gray' : 'green'} variant="light" mt="sm">
                                             <Text size="sm" fw={600}>🎉 NFT 已铸造!</Text>
@@ -163,23 +207,10 @@ const MyBookings = () => {
                                             <Text size="xs" c="dimmed" mt={5}>
                                                 NFT 状态: <Badge size="xs" color={booking.status === 'CANCELLED' ? 'gray' : 'green'}>{booking.status}</Badge>
                                             </Text>
-                                            <Text size="xs" c="dimmed" mt={5}>
-                                                合约地址: {CONTRACT_CONFIG.address.substring(0, 10)}...
-                                            </Text>
-                                            <Text 
-                                                size="xs" 
-                                                c="blue" 
-                                                style={{ cursor: 'pointer' }} 
-                                                mt="xs"
-                                                onClick={() => window.open(`https://sepolia.etherscan.io/token/${CONTRACT_CONFIG.address}?a=${booking.nftTokenId}`, '_blank')}
-                                            >
-                                                🔍 在 Etherscan 查看
-                                            </Text>
                                         </Alert>
                                     )}
 
                                     <Group mt="md">
-                                        {/* 允许 PENDING 和 SUCCESS 状态都可以 Mint NFT */}
                                         {(booking.status === 'PENDING' || booking.status === 'SUCCESS') && !booking.nftTokenId && (
                                             <Button 
                                                 size="sm" 

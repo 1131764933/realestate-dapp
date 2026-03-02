@@ -4,13 +4,13 @@ import { Container, Grid, Card, Image, Text, Button, Title, Loader, Center, Badg
 import { DatePickerInput } from '@mantine/dates';
 import { ethers } from 'ethers';
 import axios from 'axios';
-import { useWallet } from '../context/WalletContext';
+import { useAccount } from 'wagmi';
 import { CONTRACT_CONFIG, CONTRACT_ABI, BOOKING_STATUS } from '../config/contracts';
 
 const PropertyDetail = () => {
     const { id } = useParams();
     const navigate = useNavigate();
-    const { account, provider, connectWallet } = useWallet();
+    const { address: account, isConnected } = useAccount();
     
     const [property, setProperty] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -36,7 +36,8 @@ const PropertyDetail = () => {
 
     const handleBook = async () => {
         if (!account) {
-            await connectWallet();
+            // 提示用户连接钱包
+            alert('Please connect your wallet first');
             return;
         }
 
@@ -50,10 +51,14 @@ const PropertyDetail = () => {
             setTxStatus('pending');
             setErrorMessage('');
             
+            // 直接使用 window.ethereum 获取 signer
+            const ethersProvider = new ethers.BrowserProvider(window.ethereum);
+            const signer = await ethersProvider.getSigner();
+            
             const contract = new ethers.Contract(
                 CONTRACT_CONFIG.address,
                 CONTRACT_ABI,
-                await provider.getSigner()
+                signer
             );
 
             const startDate = Math.floor(dateRange[0].getTime() / 1000);
@@ -79,7 +84,7 @@ const PropertyDetail = () => {
 
             setTxStatus('success');
             setTimeout(() => {
-                navigate('/my-bookings');
+                navigate('/my-bookings', { state: { refresh: true } });
             }, 2000);
         } catch (error) {
             console.error('Booking failed:', error);
@@ -159,7 +164,7 @@ const PropertyDetail = () => {
                                     fullWidth 
                                     onClick={handleBook}
                                     loading={booking}
-                                    disabled={!property.isActive}
+                                    disabled={!property.isActive || booking}
                                 >
                                     {account ? 'Book Now' : 'Connect Wallet to Book'}
                                 </Button>

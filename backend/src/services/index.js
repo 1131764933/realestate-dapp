@@ -11,7 +11,7 @@ function initBlockchainService() {
     console.log('PRIVATE_KEY:', process.env.PRIVATE_KEY ? 'set' : 'missing');
     console.log('RPC_URL:', process.env.RPC_URL);
     
-    const contractAddress = process.env.CONTRACT_ADDRESS || '0x851356ae760d987E095750cCeb3bC6014560891C';
+    const contractAddress = process.env.CONTRACT_ADDRESS || '0xB0D4afd8879eD9F52b28595d31B441D079B2Ca07';
     const privateKey = process.env.PRIVATE_KEY;
     const rpcUrl = process.env.RPC_URL || 'http://localhost:8545';
     

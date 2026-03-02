@@ -7,8 +7,8 @@ import abiData from './abi.json';
 const abi = abiData.abi || abiData;
 
 export const CONTRACT_CONFIG = {
-    // 本地测试网部署地址 (2026-03-02 新部署 - 添加 nextTokenId)
-    address: '0x70e0bA845a1A0F2DA3359C97E0285013525FFC49',
+    // 本地测试网部署地址 (2026-03-02 Gas 优化 - BitMap)
+    address: '0xB0D4afd8879eD9F52b28595d31B441D079B2Ca07',
     network: 'localhost'
 };
 

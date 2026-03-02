@@ -34,12 +34,16 @@ contract BookingContract is ERC721URIStorage, Ownable, ReentrancyGuard {
     uint256 private _nextBookingId;
     uint256 private _nextTokenId;
 
+    // BitMap 优化常量
+    uint256 public constant START_DATE = 1735689600; // 2025-01-01 00:00:00 UTC
+    uint256 public constant DAYS_PER_SLOT = 256;
+
     // propertyId => 价格
     mapping(uint256 => uint256) public propertyPrice;
     // propertyId => 激活状态
     mapping(uint256 => bool) public propertyActive;
-    // propertyId => (date => 是否已预订)
-    mapping(uint256 => mapping(uint256 => bool)) public propertyDateBooked;
+    // propertyId => (slot => BitMap) - 每个 uint256 存 256 天的预订状态
+    mapping(uint256 => mapping(uint256 => uint256)) public propertyDateBookedBitmap;
     // bookingId => Booking 详情
     mapping(uint256 => Booking) public bookings;
     // bookingId => 实际支付金额
@@ -87,6 +91,42 @@ contract BookingContract is ERC721URIStorage, Ownable, ReentrancyGuard {
     constructor() ERC721("RealEstateBooking", "REB") Ownable() {
         _nextBookingId = 1;
         _nextTokenId = 1;
+    }
+
+    // ============ BitMap 辅助函数 ============
+
+    /**
+     * @notice 计算日期对应的 slot 和位位置
+     * @param date 日期时间戳
+     */
+    function _getSlotAndPos(uint256 date) internal pure returns (uint256 slot, uint256 pos) {
+        uint256 daysSinceStart = (date - START_DATE) / 1 days;
+        slot = daysSinceStart / DAYS_PER_SLOT;
+        pos = daysSinceStart % DAYS_PER_SLOT;
+    }
+
+    /**
+     * @notice 设置某天为已预订
+     */
+    function _setDateBooked(uint256 propertyId, uint256 date) internal {
+        (uint256 slot, uint256 pos) = _getSlotAndPos(date);
+        propertyDateBookedBitmap[propertyId][slot] |= (1 << pos);
+    }
+
+    /**
+     * @notice 清除某天预订
+     */
+    function _clearDateBooked(uint256 propertyId, uint256 date) internal {
+        (uint256 slot, uint256 pos) = _getSlotAndPos(date);
+        propertyDateBookedBitmap[propertyId][slot] &= ~(1 << pos);
+    }
+
+    /**
+     * @notice 检查某天是否已预订
+     */
+    function _isDateBooked(uint256 propertyId, uint256 date) internal view returns (bool) {
+        (uint256 slot, uint256 pos) = _getSlotAndPos(date);
+        return (propertyDateBookedBitmap[propertyId][slot] >> pos) & 1 == 1;
     }
 
     // ============ Owner 函数 ============
@@ -175,9 +215,9 @@ contract BookingContract is ERC721URIStorage, Ownable, ReentrancyGuard {
         uint256 bookingId = _nextBookingId++;
         bookingPayments[bookingId] = msg.value;
 
-        // 标记日期已预订
+        // 标记日期已预订 (BitMap 优化)
         for (uint256 d = startDate; d < endDate; d += 1 days) {
-            propertyDateBooked[propertyId][d] = true;
+            _setDateBooked(propertyId, d);
         }
 
         bookings[bookingId] = Booking({
@@ -292,8 +332,9 @@ contract BookingContract is ERC721URIStorage, Ownable, ReentrancyGuard {
         uint256 startDate,
         uint256 endDate
     ) public view returns (bool) {
+        // BitMap 优化：O(1) 位运算检查
         for (uint256 d = startDate; d < endDate; d += 1 days) {
-            if (propertyDateBooked[propertyId][d]) {
+            if (_isDateBooked(propertyId, d)) {
                 return true;
             }
         }
@@ -383,8 +424,9 @@ contract BookingContract is ERC721URIStorage, Ownable, ReentrancyGuard {
         uint256 startDate,
         uint256 endDate
     ) internal {
+        // BitMap 优化：清除预订日期
         for (uint256 d = startDate; d < endDate; d += 1 days) {
-            propertyDateBooked[propertyId][d] = false;
+            _clearDateBooked(propertyId, d);
         }
     }
 

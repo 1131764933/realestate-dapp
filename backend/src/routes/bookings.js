@@ -5,13 +5,35 @@ const { getBlockchainService } = require('../services/index');
 const { ethers } = require('ethers');
 
 // 区块链配置
-const CONTRACT_ADDRESS = '0x70e0bA845a1A0F2DA3359C97E0285013525FFC49';
+const CONTRACT_ADDRESS = '0xB0D4afd8879eD9F52b28595d31B441D079B2Ca07';
 const RPC_URL = 'http://localhost:8545';
 
 const BOOKING_ABI = [
     "function getBooking(uint256 bookingId) view returns (address user, uint256 propertyId, uint256 startDate, uint256 endDate, uint256 amount, uint8 status)",
     "function bookingCount() view returns (uint256)"
 ];
+
+// 清理重复的 bookings
+router.post('/cleanup-duplicates', async (req, res) => {
+    try {
+        const duplicates = await Booking.aggregate([
+            { $group: { _id: "$bookingId", count: { $sum: 1 }, ids: { $push: "$_id" } } },
+            { $match: { count: { $gt: 1 } } }
+        ]);
+        
+        let deleted = 0;
+        for (const doc of duplicates) {
+            // 删除第一个之外的所有重复
+            const toDelete = doc.ids.slice(1);
+            await Booking.deleteMany({ _id: { $in: toDelete } });
+            deleted += toDelete.length;
+        }
+        
+        res.json({ success: true, deleted, duplicates: duplicates.length });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
 
 // 同步所有 bookings 从区块链到数据库
 router.post('/sync-from-chain', async (req, res) => {
@@ -199,6 +221,26 @@ router.post('/', async (req, res) => {
         const newBookingId = Number(chainCount) + 1;
         
         console.log(`Creating booking: chainCount=${chainCount}, newId=${newBookingId}`);
+        
+        // 先检查是否已存在（防止重复创建）
+        const existing = await Booking.findOne({ bookingId: newBookingId });
+        if (existing) {
+            console.log(`Booking ${newBookingId} already exists, updating instead`);
+            const booking = await Booking.findOneAndUpdate(
+                { bookingId: newBookingId },
+                {
+                    propertyId,
+                    startDate: Math.floor(new Date(startDate).getTime() / 1000),
+                    endDate: Math.floor(new Date(endDate).getTime() / 1000),
+                    amount: amount.toString(),
+                    walletAddress: walletAddress.toLowerCase(),
+                    txHash,
+                    status: 'PENDING'
+                },
+                { new: true }
+            );
+            return res.status(200).json(booking);
+        }
         
         const booking = await Booking.create({
             bookingId: newBookingId,
