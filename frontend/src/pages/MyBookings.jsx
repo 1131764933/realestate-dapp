@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Container, Title, Card, Text, Badge, Button, Group, Stack, Loader, Center, Grid, Alert } from '@mantine/core';
-import { useWallet } from '../context/WalletContext';
+import { useAccount } from 'wagmi';
+import { useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { CONTRACT_CONFIG } from '../config/contracts';
 
@@ -13,7 +14,8 @@ const statusColors = {
 };
 
 const MyBookings = () => {
-    const { account } = useWallet();
+    const { address: account, isConnected } = useAccount();
+    const location = useLocation();
     const [bookings, setBookings] = useState([]);
     const [loading, setLoading] = useState(true);
     const [processing, setProcessing] = useState(null);
@@ -23,14 +25,30 @@ const MyBookings = () => {
         if (account) {
             fetchBookings();
         }
-    }, [account]);
+    }, [account, location.state?.refresh]);
+
+    // 手动同步并刷新
+    const handleRefresh = async () => {
+        setLoading(true);
+        try {
+            // 先同步
+            await axios.post('http://localhost:3000/api/bookings/sync-from-chain');
+            // 再获取
+            await fetchBookings();
+        } catch (err) {
+            console.error('Refresh error:', err);
+        }
+    };
 
     const fetchBookings = async () => {
         try {
             const response = await axios.get(`http://localhost:3000/api/bookings/user/${account}`);
-            setBookings(response.data);
+            // API 返回格式: { source, count, data: [...] }
+            const bookingsData = response.data?.data || response.data || [];
+            setBookings(Array.isArray(bookingsData) ? bookingsData : []);
         } catch (error) {
             console.error('Failed to fetch bookings:', error);
+            setBookings([]);
         } finally {
             setLoading(false);
         }
@@ -90,7 +108,12 @@ const MyBookings = () => {
 
     return (
         <Container size="xl" py="xl">
-            <Title order={1} mb="xl">My Bookings</Title>
+            <Group justify="space-between" mb="xl">
+                <Title order={1}>My Bookings</Title>
+                <Button variant="light" onClick={handleRefresh} loading={loading}>
+                    🔄 刷新
+                </Button>
+            </Group>
             
             {error && (
                 <Alert color="red" mb="md" onClose={() => setError('')} withCloseButton>
@@ -98,7 +121,7 @@ const MyBookings = () => {
                 </Alert>
             )}
             
-            {bookings.length === 0 ? (
+            {(!Array.isArray(bookings) || bookings.length === 0) ? (
                 <Text c="dimmed">No bookings yet. Go find your dream property!</Text>
             ) : (
                 <Grid>
@@ -132,19 +155,25 @@ const MyBookings = () => {
 
                                     {/* NFT 信息展示 */}
                                     {booking.nftTokenId && (
-                                        <Alert color="green" variant="light" mt="sm">
+                                        <Alert color={booking.status === 'CANCELLED' ? 'gray' : 'green'} variant="light" mt="sm">
                                             <Text size="sm" fw={600}>🎉 NFT 已铸造!</Text>
                                             <Text size="xs" c="dimmed" mt={5}>
                                                 Token ID: {booking.nftTokenId}
+                                            </Text>
+                                            <Text size="xs" c="dimmed" mt={5}>
+                                                NFT 状态: <Badge size="xs" color={booking.status === 'CANCELLED' ? 'gray' : 'green'}>{booking.status}</Badge>
+                                            </Text>
+                                            <Text size="xs" c="dimmed" mt={5}>
+                                                合约地址: {CONTRACT_CONFIG.address.substring(0, 10)}...
                                             </Text>
                                             <Text 
                                                 size="xs" 
                                                 c="blue" 
                                                 style={{ cursor: 'pointer' }} 
-                                                mt={5}
-                                                onClick={() => window.open(`https://testnets.opensea.io/assets/localhost/${CONTRACT_CONFIG.address}/${booking.nftTokenId}`, '_blank')}
+                                                mt="xs"
+                                                onClick={() => window.open(`https://sepolia.etherscan.io/token/${CONTRACT_CONFIG.address}?a=${booking.nftTokenId}`, '_blank')}
                                             >
-                                                📎 在 OpenSea 查看
+                                                🔍 在 Etherscan 查看
                                             </Text>
                                         </Alert>
                                     )}

@@ -5,7 +5,7 @@ const { getBlockchainService } = require('../services/index');
 const { ethers } = require('ethers');
 
 // 区块链配置
-const CONTRACT_ADDRESS = '0x7a2088a1bFc9d81c55368AE168C2C02570cB814F';
+const CONTRACT_ADDRESS = '0x70e0bA845a1A0F2DA3359C97E0285013525FFC49';
 const RPC_URL = 'http://localhost:8545';
 
 const BOOKING_ABI = [
@@ -19,7 +19,12 @@ router.post('/sync-from-chain', async (req, res) => {
         const provider = new ethers.JsonRpcProvider(RPC_URL);
         const contract = new ethers.Contract(CONTRACT_ADDRESS, BOOKING_ABI, provider);
         
+        console.log('=== SYNC DEBUG ===');
+        console.log('Contract:', CONTRACT_ADDRESS);
+        
         const count = await contract.bookingCount();
+        console.log('Count:', count.toString());
+        
         const statusMap = ['PENDING', 'CONFIRMED', 'CANCELLED', 'COMPLETED', 'FAILED'];
         
         let synced = 0;
@@ -219,14 +224,20 @@ router.post('/:id/mint-nft', async (req, res) => {
         const bookingId = parseInt(req.params.id);
         const { walletAddress } = req.body;
         
-        // 调用合约铸造 NFT
-        const tx = await blockchainService.mintNFT(bookingId, walletAddress);
+        const blockchainService = getBlockchainService();
+        if (!blockchainService) {
+            throw new Error('Blockchain service not initialized');
+        }
         
-        // 更新数据库
+        // 调用合约铸造 NFT，获取返回的 tokenId
+        const result = await blockchainService.mintNFT(bookingId, walletAddress);
+        const { tokenId, receipt } = result;
+        
+        // 使用真实的 tokenId 更新数据库
         const booking = await Booking.findOneAndUpdate(
             { bookingId },
             { 
-                nftTokenId: bookingId, // 简化处理
+                nftTokenId: tokenId,
                 updatedAt: new Date() 
             },
             { new: true }
@@ -234,7 +245,8 @@ router.post('/:id/mint-nft', async (req, res) => {
         
         res.json({ 
             success: true, 
-            txHash: tx.hash,
+            txHash: receipt.hash,
+            tokenId,
             booking 
         });
     } catch (error) {

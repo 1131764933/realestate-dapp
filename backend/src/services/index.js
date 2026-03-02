@@ -11,11 +11,11 @@ function initBlockchainService() {
     console.log('PRIVATE_KEY:', process.env.PRIVATE_KEY ? 'set' : 'missing');
     console.log('RPC_URL:', process.env.RPC_URL);
     
-    const contractAddress = process.env.CONTRACT_ADDRESS || '0x7a2088a1bFc9d81c55368AE168C2C02570cB814F';
+    const contractAddress = process.env.CONTRACT_ADDRESS || '0x851356ae760d987E095750cCeb3bC6014560891C';
     const privateKey = process.env.PRIVATE_KEY;
     const rpcUrl = process.env.RPC_URL || 'http://localhost:8545';
     
-    // 完整的 ABI（包含事件）
+    // 完整的 ABI（包含事件和 nextTokenId）
     const abi = [
         "function propertyPrice(uint256) view returns (uint256)",
         "function propertyActive(uint256) view returns (bool)",
@@ -27,10 +27,12 @@ function initBlockchainService() {
         "function completeBooking(uint256)",
         "function mintBookingNFT(address, uint256)",
         "function bookingCount() view returns (uint256)",
+        "function nextTokenId() view returns (uint256)",
         "event BookingCreated(uint256, address, uint256, uint256, uint256, uint256, uint8)",
         "event BookingCancelled(uint256, address, uint8)",
         "event BookingCompleted(uint256, address, uint8)",
-        "event PropertyAdded(uint256, uint256)"
+        "event PropertyAdded(uint256, uint256)",
+        "event NFTMinted(uint256, uint256, address)"
     ];
     
     // 创建 provider（只读）

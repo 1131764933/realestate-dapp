@@ -315,6 +315,13 @@ contract BookingContract is ERC721URIStorage, Ownable, ReentrancyGuard {
     }
 
     /**
+     * @notice 获取下一个 NFT Token ID（用于获取刚铸造的 NFT ID）
+     */
+    function nextTokenId() public view returns (uint256) {
+        return _nextTokenId;
+    }
+
+    /**
      * @notice 获取 NFT 元数据
      */
     function tokenURI(uint256 tokenId) public view override returns (string memory) {
@@ -350,9 +357,9 @@ contract BookingContract is ERC721URIStorage, Ownable, ReentrancyGuard {
             '{"trait_type":"Property ID","display_type":"number","value":', uint2str(booking.propertyId), '},'
         ));
 
-        // Amount in ETH (除以 10^18)
+        // Amount in wei (显示原始值)
         json = string(abi.encodePacked(json,
-            '{"trait_type":"Amount ETH","display_type":"number","value":', uint2str(booking.amount / 1 ether), '},'
+            '{"trait_type":"Amount Wei","display_type":"number","value":', uint2str(booking.amount), '},'
         ));
 
         // Status

@@ -1,11 +1,14 @@
 // 前端合约配置
 // 部署后从 contracts/deployment.json 获取地址
 
-import abi from './abi.json';
+import abiData from './abi.json';
+
+// 提取 abi 数组
+const abi = abiData.abi || abiData;
 
 export const CONTRACT_CONFIG = {
-    // 本地测试网部署地址 (2026-03-02 NFT tokenURI 更新)
-    address: '0x7a2088a1bFc9d81c55368AE168C2C02570cB814F',
+    // 本地测试网部署地址 (2026-03-02 新部署 - 添加 nextTokenId)
+    address: '0x70e0bA845a1A0F2DA3359C97E0285013525FFC49',
     network: 'localhost'
 };
 

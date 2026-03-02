@@ -81,8 +81,21 @@ class BlockchainService {
      */
     async mintNFT(bookingId, fromAddress) {
         const contract = this.getSignedContract();
+        
+        // 先查询当前 tokenId 数量
+        const startTokenId = await contract.nextTokenId();
+        
         const tx = await contract.mintBookingNFT(fromAddress, bookingId, { from: fromAddress });
-        return await tx.wait();
+        const receipt = await tx.wait();
+        
+        // 查询新的 tokenId
+        const endTokenId = await contract.nextTokenId();
+        const tokenId = endTokenId - 1n;
+        
+        return {
+            receipt,
+            tokenId: Number(tokenId)
+        };
     }
 
     /**
