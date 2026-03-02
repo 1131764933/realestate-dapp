@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Container, Title, Card, Text, Badge, Button, Group, Stack, Loader, Center, Grid, Alert } from '@mantine/core';
+import { Container, Title, Card, Text, Badge, Button, Group, Stack, Loader, Center, Grid, Alert, Anchor } from '@mantine/core';
 import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { CONTRACT_CONFIG, CONTRACT_ABI } from '../config/contracts';
+
+// Etherscan 测试网链接
+const ETHERSCAN_BASE_URL = 'https://sepolia.etherscan.io';
 
 const statusColors = {
     PENDING: 'yellow',
@@ -193,9 +196,14 @@ const MyBookings = () => {
                                     </Text>
                                     
                                     {booking.txHash && (
-                                        <Text size="xs" c="dimmed" style={{ wordBreak: 'break-all' }}>
-                                            TX: {booking.txHash.substring(0, 20)}...
-                                        </Text>
+                                        <Anchor 
+                                            href={`${ETHERSCAN_BASE_URL}/tx/${booking.txHash}`} 
+                                            target="_blank" 
+                                            size="xs" 
+                                            c="blue"
+                                        >
+                                            📋 View Transaction on Etherscan
+                                        </Anchor>
                                     )}
 
                                     {booking.nftTokenId && (
@@ -207,6 +215,16 @@ const MyBookings = () => {
                                             <Text size="xs" c="dimmed" mt={5}>
                                                 NFT 状态: <Badge size="xs" color={booking.status === 'CANCELLED' ? 'gray' : 'green'}>{booking.status}</Badge>
                                             </Text>
+                                            <Anchor 
+                                                href={`${ETHERSCAN_BASE_URL}/nft/${CONTRACT_CONFIG.address}/${booking.nftTokenId}`}
+                                                target="_blank"
+                                                size="xs"
+                                                c="blue"
+                                                mt={5}
+                                                style={{ display: 'block' }}
+                                            >
+                                                🔗 View NFT on Etherscan
+                                            </Anchor>
                                         </Alert>
                                     )}
 

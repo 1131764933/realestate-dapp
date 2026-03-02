@@ -18,6 +18,7 @@ const PropertyDetail = () => {
     const [booking, setBooking] = useState(false);
     const [txStatus, setTxStatus] = useState('idle'); // idle, pending, success, failed
     const [errorMessage, setErrorMessage] = useState('');
+    const [disabledDates, setDisabledDates] = useState([]);
 
     useEffect(() => {
         fetchProperty();
@@ -27,10 +28,45 @@ const PropertyDetail = () => {
         try {
             const response = await axios.get(`http://localhost:3000/api/properties/${id}`);
             setProperty(response.data);
+            
+            // 获取该房源的所有预订日期
+            await fetchBookedDates(id);
         } catch (error) {
             console.error('Failed to fetch property:', error);
         } finally {
             setLoading(false);
+        }
+    };
+    
+    // 获取已预订日期并禁用
+    const fetchBookedDates = async (propertyId) => {
+        try {
+            const response = await axios.get(`http://localhost:3000/api/bookings/user/${account}`);
+            const bookings = response.data?.data || response.data || [];
+            
+            // 筛选当前房源的预订
+            const propertyBookings = bookings.filter(
+                b => b.propertyId === parseInt(propertyId) && 
+                (b.status === 'PENDING' || b.status === 'SUCCESS' || b.status === 'CONFIRMED')
+            );
+            
+            // 收集所有已预订的日期
+            const dates = [];
+            propertyBookings.forEach(booking => {
+                const start = new Date(booking.startDate * 1000);
+                const end = new Date(booking.endDate * 1000);
+                
+                // 从 start 到 end 的每一天
+                const current = new Date(start);
+                while (current <= end) {
+                    dates.push(new Date(current));
+                    current.setDate(current.getDate() + 1);
+                }
+            });
+            
+            setDisabledDates(dates);
+        } catch (error) {
+            console.error('Failed to fetch booked dates:', error);
         }
     };
 
@@ -174,8 +210,25 @@ const PropertyDetail = () => {
                                     value={dateRange}
                                     onChange={setDateRange}
                                     minDate={new Date()}
+                                    disabledDates={(date) => {
+                                        return disabledDates.some(
+                                            disabled => disabled.toDateString() === date.toDateString()
+                                        );
+                                    }}
                                     disabled={!property.isActive}
                                 />
+
+                                {disabledDates.length > 0 && (
+                                    <Text size="xs" c="orange">
+                                        ⚠️ {disabledDates.length} dates already booked (shown as disabled)
+                                    </Text>
+                                )}
+
+                                {txStatus === 'pending' && (
+                                    <Alert color="blue" title="Processing...">
+                                        ⏳ Transaction pending. Please confirm in MetaMask...
+                                    </Alert>
+                                )}
 
                                 {errorMessage && (
                                     <Alert color="red" title="Error">
